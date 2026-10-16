@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { ExpressPeerServer } from 'peer'
 import { WebSocketServer } from 'ws'
 import { createPublicRoomsHub } from './publicRooms.js'
+import { createAmqpRoomsRelay } from './amqpRooms.js'
 
 const port = process.env.PORT || 9000
 
@@ -23,7 +24,8 @@ const server = ExpressPeerServer(httpServer, {
 app.use('/', server)
 
 const roomsSocketServer = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 })
-const rooms = createPublicRoomsHub(roomsSocketServer)
+const amqpRelay = process.env.CLOUDAMQP_URL ? createAmqpRoomsRelay({ url: process.env.CLOUDAMQP_URL }) : null
+const rooms = createPublicRoomsHub(roomsSocketServer, { relay: amqpRelay })
 httpServer.on('upgrade', (request, socket, head) => {
   let path
   try { path = new URL(request.url, 'http://localhost').pathname } catch { socket.destroy(); return }
@@ -31,7 +33,7 @@ httpServer.on('upgrade', (request, socket, head) => {
   if (!target) { socket.destroy(); return }
   target.handleUpgrade(request, socket, head, ws => target.emit('connection', ws, request))
 })
-httpServer.on('close', () => rooms.close())
+httpServer.on('close', () => { rooms.close(); void amqpRelay?.close() })
 server.on('error', error => console.error('[P2P Server]', error))
 roomsSocketServer.on('error', error => console.error('[Rooms Server]', error))
 

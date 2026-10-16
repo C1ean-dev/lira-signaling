@@ -22,24 +22,72 @@ function metadata(input, now) {
   return result
 }
 
-export function createPublicRoomsHub(wss, { now = Date.now, pruneIntervalMs = 5000 } = {}) {
+export function createPublicRoomsHub(wss, { now = Date.now, pruneIntervalMs = 5000, relay = null } = {}) {
   const rooms = new Map()
   const clients = new Set()
+  let closed = false
+  let relayGeneration = 0
   const send = (socket, message) => {
     if (socket.readyState !== 1) return
     try { socket.send(JSON.stringify(message)) } catch {}
   }
   const broadcast = message => clients.forEach(socket => send(socket, message))
-  const remove = code => {
+  const publishRoom = (entry, type = 'ANNOUNCE_ROOM') => {
+    if (!relay || entry.origin) return
+    const generation = relayGeneration
+    const room = entry.room
+    void relay.publish({ type, roomInfo: room, timestamp: now() }).then(confirmed => {
+      if (!confirmed || closed || generation !== relayGeneration || rooms.get(room.code) !== entry ||
+        entry.room !== room || now() - room.lastHeartbeat >= ROOM_TTL_MS) return
+      entry.confirmedAt = now()
+      broadcast({ type: 'ROOM_PUBLISHED', service: 'RabbitMQ', roomId: room.code,
+        hostId: room.hostId, announcementId: room.announcementId, timestamp: now() })
+    }).catch(() => {})
+  }
+  const announcement = (entry, type = 'ANNOUNCE_ROOM') => ({
+    type, roomInfo: entry.room, timestamp: now(),
+    ...(entry.origin || (entry.confirmedAt !== undefined && now() - entry.confirmedAt < ROOM_TTL_MS)
+      ? { publicationServices: ['RabbitMQ'] } : {}),
+  })
+  const remove = (code, forward = true) => {
+    const entry = rooms.get(code)
     rooms.delete(code)
-    broadcast({ type: 'UNREGISTER_ROOM', roomId: code, timestamp: now() })
+    const message = { type: 'UNREGISTER_ROOM', roomId: code, timestamp: now() }
+    broadcast(message)
+    if (forward && entry && !entry.origin) void relay?.publish(message).catch(() => {})
   }
   const prune = () => {
     for (const [code, entry] of rooms) if (now() - entry.room.lastHeartbeat > ROOM_TTL_MS) remove(code)
   }
+  const unsubscribeMessage = relay?.onMessage((message, origin) => {
+    if (closed) return
+    prune()
+    if (message.type === 'QUERY_ROOMS') {
+      for (const entry of rooms.values()) publishRoom(entry)
+    } else if (message.type === 'ANNOUNCE_ROOM' || message.type === 'HEARTBEAT') {
+      const room = metadata(message.roomInfo, now())
+      if (!room) return
+      const existing = rooms.get(room.code)
+      if (existing && existing.origin !== origin) return
+      const entry = { room, origin }
+      rooms.set(room.code, entry)
+      broadcast(announcement(entry, message.type))
+    } else if (message.type === 'UNREGISTER_ROOM' && rooms.get(message.roomId)?.origin === origin) {
+      remove(message.roomId, false)
+    }
+  })
+  const unsubscribeStatus = relay?.subscribeStatus(service => {
+    relayGeneration++
+    for (const entry of rooms.values()) entry.confirmedAt = undefined
+    broadcast({ type: 'SERVICE_STATUS', services: [service] })
+    if (service.status === 'connected') {
+      void relay.publish({ type: 'QUERY_ROOMS', timestamp: now() }).catch(() => {})
+      for (const entry of rooms.values()) publishRoom(entry)
+    }
+  })
   wss.on('connection', socket => {
     clients.add(socket)
-    send(socket, { type: 'READY', protocolVersion: 1 })
+    send(socket, { type: 'READY', protocolVersion: 1, ...(relay ? { services: [relay.getStatus()] } : {}) })
     socket.on('error', () => {})
     socket.on('message', data => {
       try {
@@ -48,7 +96,7 @@ export function createPublicRoomsHub(wss, { now = Date.now, pruneIntervalMs = 50
         if (!message || typeof message !== 'object') return
         prune()
         if (message.type === 'QUERY_ROOMS') {
-          for (const { room } of rooms.values()) send(socket, { type: 'ANNOUNCE_ROOM', roomInfo: room, timestamp: now() })
+          for (const entry of rooms.values()) send(socket, announcement(entry))
         } else if (message.type === 'ANNOUNCE_ROOM' || message.type === 'HEARTBEAT') {
           const room = metadata(message.roomInfo, now())
           if (!room) return
@@ -57,8 +105,10 @@ export function createPublicRoomsHub(wss, { now = Date.now, pruneIntervalMs = 50
           // Each host connection advertises at most one room.
           for (const [code, entry] of rooms) if (entry.owner === socket && code !== room.code) remove(code)
           if (existing) room.createdAt = existing.room.createdAt
-          rooms.set(room.code, { owner: socket, room })
-          broadcast({ type: message.type, roomInfo: room, timestamp: now() })
+          const entry = { owner: socket, room }
+          rooms.set(room.code, entry)
+          broadcast(announcement(entry, message.type))
+          publishRoom(entry, message.type)
         } else if (message.type === 'UNREGISTER_ROOM') {
           if (rooms.get(message.roomId)?.owner === socket) remove(message.roomId)
         }
@@ -71,5 +121,12 @@ export function createPublicRoomsHub(wss, { now = Date.now, pruneIntervalMs = 50
   })
   const timer = pruneIntervalMs > 0 ? setInterval(prune, pruneIntervalMs) : null
   timer?.unref()
-  return { prune, close() { if (timer) clearInterval(timer); rooms.clear(); clients.clear() } }
+  return { prune, close() {
+    closed = true
+    unsubscribeMessage?.()
+    unsubscribeStatus?.()
+    if (timer) clearInterval(timer)
+    rooms.clear()
+    clients.clear()
+  } }
 }

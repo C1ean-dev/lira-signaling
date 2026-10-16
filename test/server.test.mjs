@@ -6,7 +6,7 @@ import WebSocket from 'ws'
 
 test('serves room discovery and existing PeerJS signaling on the same port', { timeout: 20000 }, async t => {
   const child = spawn(process.execPath, ['server.js'], {
-    cwd: new URL('../', import.meta.url), env: { ...process.env, PORT: '0' }, windowsHide: true,
+    cwd: new URL('../', import.meta.url), env: { ...process.env, CLOUDAMQP_URL: '', PORT: '0' }, windowsHide: true,
   })
   const sockets = []
   t.after(async () => {

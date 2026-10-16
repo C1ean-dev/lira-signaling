@@ -2,15 +2,18 @@
   "name": "lira-signaling",
   "version": "1.0.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
   },
   "dependencies": {
-    "peer": "^1.0.2",
+    "amqplib": "^2.2.0",
     "express": "^4.22.3",
+    "peer": "^1.0.2",
     "ws": "^8.22.0"
   }
 }
