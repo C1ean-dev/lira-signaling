@@ -3,10 +3,14 @@ import { createServer } from 'node:http'
 import { ExpressPeerServer } from 'peer'
 import { WebSocketServer } from 'ws'
 import { createPublicRoomsHub } from './publicRooms.js'
+import { createTurnCredentialsHandler } from './turnCredentials.js'
 
 const port = process.env.PORT || 9000
 
 const app = express()
+// Render terminates TLS and supplies the client address through one proxy.
+app.set('trust proxy', 1)
+app.all('/turn/credentials', createTurnCredentialsHandler())
 const httpServer = createServer(app)
 let signalingSocketServer
 let signalingPath

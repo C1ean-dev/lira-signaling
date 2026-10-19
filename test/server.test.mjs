@@ -6,7 +6,7 @@ import WebSocket from 'ws'
 
 test('serves room discovery and existing PeerJS signaling on the same port', { timeout: 20000 }, async t => {
   const child = spawn(process.execPath, ['server.js'], {
-    cwd: new URL('../', import.meta.url), env: { ...process.env, PORT: '0' }, windowsHide: true,
+    cwd: new URL('../', import.meta.url), env: { ...process.env, CLOUDFLARE_TURN_KEY_ID: '', CLOUDFLARE_TURN_API_TOKEN: '', PORT: '0' }, windowsHide: true,
   })
   const sockets = []
   t.after(async () => {
@@ -38,6 +38,11 @@ test('serves room discovery and existing PeerJS signaling on the same port', { t
   assert.equal(peer.first.type, 'OPEN')
   const http = await fetch(`http://127.0.0.1:${port}/`)
   assert.equal(http.status, 200)
+  const turn = await fetch(`http://127.0.0.1:${port}/turn/credentials`)
+  assert.equal(turn.status, 503)
+  assert.equal(turn.headers.get('cache-control'), 'no-store')
+  const preflight = await fetch(`http://127.0.0.1:${port}/turn/credentials`, { method: 'OPTIONS' })
+  assert.equal(preflight.status, 204)
   const response = once(discovery.socket, 'message')
   discovery.socket.send(JSON.stringify({ type: 'ANNOUNCE_ROOM', roomInfo: {
     id: 'test', code: 'TEST', name: 'Public room', hostId: 'test-peer', hostName: 'Ana', playerCount: 1, maxPlayers: 12, color: '#fff',
