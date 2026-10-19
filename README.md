@@ -27,6 +27,27 @@ owning connection closes. State is held in memory; after a server restart,
 clients reconnect and announce again. Use one instance unless shared room state
 is added for horizontal scaling.
 
+## Cloudflare TURN credentials
+
+`GET /turn/credentials` issues temporary TURN credentials for the Lira client.
+Configure `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN` as secret
+environment variables on Render and redeploy. The application is `lirasvg`.
+Keep the API token on the backend; it must never be bundled in a frontend or
+committed. GitHub Secrets with these names are safe storage but are not
+automatically injected into a running Render service.
+
+Each request creates credentials with a 24-hour lifetime and returns only
+`{ iceServers, expiresAt }`. Responses use `Cache-Control: no-store`; CORS permits
+the desktop, web and Android clients without cookies. Issuance is bounded to ten
+requests per minute per IP (behind Render's proxy), with a four-second upstream
+timeout. Errors are generic and never include upstream bodies or API tokens.
+An unconfigured server returns 503, and upstream failures return 502, allowing
+the client to fall back to Metered. Existing PeerJS and discovery routes are
+preserved.
+
+Run `node --test test/turnCredentials.test.mjs test/server.test.mjs` to test the
+issuer with a mocked Cloudflare API and the HTTP route with no external calls.
+
 ## Tests and deployment
 
 `npm test` runs the room registry tests and an integration test covering both
