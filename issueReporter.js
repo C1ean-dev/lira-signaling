@@ -1,10 +1,12 @@
-const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000 // 5 minutos
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000 // 1 hora (limite de 5 chamadas por hora)
 const MAX_REQUESTS_PER_WINDOW = 5
 
 export function createIssueReporterHandler({
   env = process.env,
   fetch: fetcher = globalThis.fetch,
   now = Date.now,
+  rateLimitWindowMs = RATE_LIMIT_WINDOW_MS,
+  maxRequestsPerWindow = MAX_REQUESTS_PER_WINDOW,
 } = {}) {
   const clients = new Map()
 
@@ -53,13 +55,14 @@ export function createIssueReporterHandler({
         fail(429, 'Too many requests, try again later')
         return
       }
-      bucket = { count: 0, until: time + RATE_LIMIT_WINDOW_MS }
+      bucket = { count: 0, until: time + rateLimitWindowMs }
       clients.set(ip, bucket)
     }
 
-    if (++bucket.count > MAX_REQUESTS_PER_WINDOW) {
-      res.setHeader('Retry-After', '300')
-      fail(429, 'Too many reports from this client. Please wait a few minutes.')
+    if (++bucket.count > maxRequestsPerWindow) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((bucket.until - time) / 1000))
+      res.setHeader('Retry-After', String(retryAfterSeconds))
+      fail(429, 'Too many reports from this client. Rate limit is 5 reports per hour.')
       return
     }
 

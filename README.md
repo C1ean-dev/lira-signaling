@@ -97,7 +97,7 @@ Accepts `POST` requests with JSON payloads up to 10 MB:
 
 - `201 Created`: Returns `{ ok: true, issueUrl, issueNumber, gistUrl? }`.
 - `400 Bad Request`: Validation failure on title or description length.
-- `429 Too Many Requests`: Per-IP rate limiting (maximum 5 submissions per 5-minute window per IP, includes `Retry-After: 300` header).
+- `429 Too Many Requests`: Per-IP rate limiting (maximum 5 submissions per 1-hour window per IP, includes `Retry-After` header with remaining seconds).
 - `502 Bad Gateway`: GitHub API upstream error or timeout (8s timeout for issues, 6s for gists).
 - `503 Service Unavailable`: Server lacks configured GitHub token.
 

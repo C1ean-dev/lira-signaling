@@ -137,12 +137,13 @@ test('validates minimum and maximum length for title and description', async () 
   assert.equal(res2.statusCode, 400)
 })
 
-test('rate limits requests per IP after 5 submissions', async () => {
+test('rate limits requests per IP after 5 submissions per hour', async () => {
+  let currentTime = 1000000
   const fetchMock = async () => ({
     ok: true,
     json: async () => ({ html_url: 'https://github.com/C1ean-dev/Lira/issues/1', number: 1 }),
   })
-  const handler = createIssueReporterHandler({ env, fetch: fetchMock })
+  const handler = createIssueReporterHandler({ env, fetch: fetchMock, now: () => currentTime })
   const req = {
     method: 'POST',
     ip: '10.0.0.99',
@@ -159,6 +160,15 @@ test('rate limits requests per IP after 5 submissions', async () => {
   await handler(req, res6)
   assert.equal(res6.statusCode, 429)
   assert.equal(res6.body.ok, false)
+  assert.equal(res6.headers['Retry-After'], '3600')
+  assert.match(res6.body.error, /hour/i)
+
+  // Resets after 1 hour window
+  currentTime += 60 * 60 * 1000 + 1
+  const resAfterHour = mockResponse()
+  await handler(req, resAfterHour)
+  assert.equal(resAfterHour.statusCode, 201)
+  assert.equal(resAfterHour.body.ok, true)
 })
 
 test('handles CORS preflight OPTIONS request with 204', async () => {
