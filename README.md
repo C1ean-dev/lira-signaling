@@ -48,13 +48,88 @@ preserved.
 Run `node --test test/turnCredentials.test.mjs test/server.test.mjs` to test the
 issuer with a mocked Cloudflare API and the HTTP route with no external calls.
 
+## Anonymous issue reporter (`issuesReporter`)
+
+`POST /report-issue` provides an anonymous bug reporting endpoint for Lira clients,
+creating GitHub issues (and secret diagnostic Gists) without exposing GitHub tokens
+to frontend client bundles.
+
+### Configuration
+
+Set the following environment variables:
+
+- `GITHUB_REPORT_TOKEN` (or `GITHUB_TOKEN`): GitHub Personal Access Token with permissions to create issues and secret gists (`repo` and `gist` scopes).
+- `GITHUB_REPO`: Target repository in `owner/repo` format (defaults to `C1ean-dev/Lira` if omitted).
+
+### Request format
+
+Accepts `POST` requests with JSON payloads up to 10 MB:
+
+```json
+{
+  "title": "Audio distortion when entering room",
+  "description": "Steps to reproduce and observed behavior...",
+  "systemInfo": {
+    "appVersion": "1.1.117",
+    "os": "win32",
+    "electron": "33.0.0",
+    "chrome": "130.0.6723.44",
+    "node": "20.18.0",
+    "timestamp": "2026-11-03T22:00:00.000Z"
+  },
+  "rawFiles": [
+    { "name": "lira-debug.log", "content": "Log content..." }
+  ],
+  "logSummaries": {
+    "Recent Logs": "Last 50 log lines..."
+  }
+}
+```
+
+- `title`: String between 3 and 250 characters (required).
+- `description`: String between 5 and 50,000 characters (required).
+- `systemInfo`: Optional object with client environment metadata, formatted as bullet points in the issue.
+- `rawFiles`: Optional array of `{ name, content }` objects (files up to 500 KB each). When provided, the server creates a private GitHub Gist and automatically links it in an alert box within the issue.
+- `logSummaries`: Optional key-value object rendered as collapsible `<details>` sections.
+- `body`: Optional markdown string that completely overrides automatic template formatting.
+
+### Responses and error handling
+
+- `201 Created`: Returns `{ ok: true, issueUrl, issueNumber, gistUrl? }`.
+- `400 Bad Request`: Validation failure on title or description length.
+- `429 Too Many Requests`: Per-IP rate limiting (maximum 5 submissions per 5-minute window per IP, includes `Retry-After: 300` header).
+- `502 Bad Gateway`: GitHub API upstream error or timeout (8s timeout for issues, 6s for gists).
+- `503 Service Unavailable`: Server lacks configured GitHub token.
+
+CORS headers are set to allow requests from any origin (`*`), and `OPTIONS` preflight requests return `204 No Content`. Sensitive credentials are kept strictly server-side.
+
+Run `node --test test/issueReporter.test.mjs` to test the issue reporter with mocked GitHub endpoints and rate limiting validation.
+
+## Environment variables summary
+
+| Variable | Required | Description | Default |
+| --- | --- | --- | --- |
+| `PORT` | No | HTTP and WebSocket listening port | `9000` |
+| `CLOUDFLARE_TURN_KEY_ID` | Yes (for TURN) | Cloudflare Calls TURN key ID | - |
+| `CLOUDFLARE_TURN_API_TOKEN` | Yes (for TURN) | Cloudflare Calls TURN API token | - |
+| `GITHUB_REPORT_TOKEN` | Yes (for issues) | GitHub PAT for creating issues and secret gists | - |
+| `GITHUB_REPO` | No | Target repository (`owner/repo`) for reported issues | `C1ean-dev/Lira` |
+
 ## Tests and deployment
 
-`npm test` runs the room registry tests and an integration test covering both
-WebSocket endpoints and the existing PeerJS HTTP endpoint on the same port.
+Run the test suite:
+
+```bash
+npm test
+```
+
+This runs all tests using Node's native test runner (`node --test`), covering:
+- Room discovery protocol and heartbeat expiration (`test/publicRooms.test.mjs`)
+- Cloudflare TURN credentials generation and rate limiting (`test/turnCredentials.test.mjs`)
+- Anonymous issue reporting with GitHub API & Gist integration (`test/issueReporter.test.mjs`)
+- Server integration with PeerJS, WebSockets, and HTTP routes on the same port (`test/server.test.mjs`)
 
 Deploy this version to the Render service together with the matching Lira app
-integration. The discovery endpoint is an addition to the existing signaling
-protocol. Older app versions continue using PeerJS normally. The updated app
-continues querying EMQX and HiveMQ if Render is unavailable or still running
-the earlier signaling-only version.
+integration. The PeerJS signaling, WebSocket room discovery, TURN credentials,
+and issue reporting endpoints all run concurrently on a single port. Older app
+versions continue using PeerJS normally.
