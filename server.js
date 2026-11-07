@@ -6,6 +6,7 @@ import { createPublicRoomsHub } from './publicRooms.js'
 import { createTurnCredentialsHandler } from './turnCredentials.js'
 import { createIssueReporterHandler } from './issueReporter.js'
 import { createReportAttachmentHandler } from './reportAttachments.mjs'
+import { createNativeUpdates } from './nativeUpdates.mjs'
 
 const port = process.env.PORT || 9000
 
@@ -19,6 +20,9 @@ app.all('/report-issue/lira-clean', express.json({ limit: '10mb' }), createIssue
   attachmentBaseUrl: 'https://lira-signaling.onrender.com/report-issue/lira-clean/attachments',
 }))
 app.get('/report-issue/lira-clean/attachments/:gistId/:index', createReportAttachmentHandler())
+const nativeUpdates = createNativeUpdates()
+app.get('/updates/lira-clean/latest', nativeUpdates.latest)
+app.get('/updates/lira-clean/assets/:assetId', nativeUpdates.asset)
 const httpServer = createServer(app)
 let signalingSocketServer
 let signalingPath
