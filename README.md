@@ -4,6 +4,26 @@ Run `npm install` and `npm start` on Node.js 20 or newer. The server listens on
 `PORT` (9000 by default), preserving PeerJS HTTP routes and the `/peerjs`
 WebSocket endpoint. No database or additional Render service is required.
 
+## Native P2P bootstrap
+
+`GET /p2p/bootstrap/v1` serves a pre-signed catalog of independent native P2P
+nodes. Set `LIRA_P2P_BOOTSTRAP_MANIFEST` to the JSON envelope containing
+`payload` and `signature` (both base64url without padding). Set
+`LIRA_P2P_CATALOG_KEY` to the raw 32-byte Ed25519 public key, base64url encoded.
+Sign catalogs offline. The signing private key belongs outside this service.
+
+The signed payload contains `version: 1`, a positive monotonic `revision`,
+`expires` as Unix seconds, and up to 32 `nodes`. Each node contains `peer_id`,
+one to eight full libp2p `addresses`, and `roles` including `bootstrap` and
+`relay`. The optional `media` role identifies a media forwarding node.
+Catalogs expire within 30 days. Responses are cached for at most five minutes,
+bounded by expiry. Missing configuration, invalid signatures and expired
+catalogs return 503 with `Cache-Control: no-store`.
+
+The native client validates the same signature against its release trust key
+and also uses its packaged catalog and valid local cache. Run `npm test` to
+cover this endpoint together with the existing PeerJS and discovery routes.
+
 ## Public rooms
 
 Connect to `wss://lira-signaling.onrender.com/rooms`. The server sends

@@ -3,10 +3,17 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import WebSocket from 'ws'
+import { generateKeyPairSync, sign } from 'node:crypto'
 
 test('serves room discovery and existing PeerJS signaling on the same port', { timeout: 20000 }, async t => {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const catalog = Buffer.from(JSON.stringify({ version: 1, revision: 1, expires: Math.floor(Date.now() / 1000) + 3600, nodes: [] }))
+  const manifest = { payload: catalog.toString('base64url'), signature: sign(null, catalog, privateKey).toString('base64url') }
   const child = spawn(process.execPath, ['server.js'], {
-    cwd: new URL('../', import.meta.url), env: { ...process.env, CLOUDFLARE_TURN_KEY_ID: '', CLOUDFLARE_TURN_API_TOKEN: '', PORT: '0' }, windowsHide: true,
+    cwd: new URL('../', import.meta.url), env: { ...process.env, CLOUDFLARE_TURN_KEY_ID: '', CLOUDFLARE_TURN_API_TOKEN: '', PORT: '0',
+      LIRA_P2P_CATALOG_KEY: publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('base64url'),
+      LIRA_P2P_BOOTSTRAP_MANIFEST: JSON.stringify(manifest),
+    }, windowsHide: true,
   })
   const sockets = []
   t.after(async () => {
@@ -38,6 +45,9 @@ test('serves room discovery and existing PeerJS signaling on the same port', { t
   assert.equal(peer.first.type, 'OPEN')
   const http = await fetch(`http://127.0.0.1:${port}/`)
   assert.equal(http.status, 200)
+  const bootstrap = await fetch(`http://127.0.0.1:${port}/p2p/bootstrap/v1`)
+  assert.equal(bootstrap.status, 200)
+  assert.deepEqual(await bootstrap.json(), manifest)
   const turn = await fetch(`http://127.0.0.1:${port}/turn/credentials`)
   assert.equal(turn.status, 503)
   assert.equal(turn.headers.get('cache-control'), 'no-store')

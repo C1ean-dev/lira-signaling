@@ -5,12 +5,14 @@ import { WebSocketServer } from 'ws'
 import { createPublicRoomsHub } from './publicRooms.js'
 import { createTurnCredentialsHandler } from './turnCredentials.js'
 import { createIssueReporterHandler } from './issueReporter.js'
+import { createP2pBootstrapHandler } from './p2pBootstrap.js'
 
 const port = process.env.PORT || 9000
 
 const app = express()
 // Render terminates TLS and supplies the client address through one proxy.
 app.set('trust proxy', 1)
+app.all('/p2p/bootstrap/v1', createP2pBootstrapHandler())
 app.all('/turn/credentials', createTurnCredentialsHandler())
 app.all('/report-issue', express.json({ limit: '10mb' }), createIssueReporterHandler())
 const httpServer = createServer(app)
