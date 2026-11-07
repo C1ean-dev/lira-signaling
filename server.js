@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws'
 import { createPublicRoomsHub } from './publicRooms.js'
 import { createTurnCredentialsHandler } from './turnCredentials.js'
 import { createIssueReporterHandler } from './issueReporter.js'
+import { createReportAttachmentHandler } from './reportAttachments.mjs'
 
 const port = process.env.PORT || 9000
 
@@ -13,7 +14,11 @@ const app = express()
 app.set('trust proxy', 1)
 app.all('/turn/credentials', createTurnCredentialsHandler())
 app.all('/report-issue', express.json({ limit: '10mb' }), createIssueReporterHandler())
-app.all('/report-issue/lira-clean', express.json({ limit: '10mb' }), createIssueReporterHandler({ targetRepository: 'C1ean-dev/lira-clean' }))
+app.all('/report-issue/lira-clean', express.json({ limit: '10mb' }), createIssueReporterHandler({
+  targetRepository: 'C1ean-dev/lira-clean',
+  attachmentBaseUrl: 'https://lira-signaling.onrender.com/report-issue/lira-clean/attachments',
+}))
+app.get('/report-issue/lira-clean/attachments/:gistId/:index', createReportAttachmentHandler())
 const httpServer = createServer(app)
 let signalingSocketServer
 let signalingPath

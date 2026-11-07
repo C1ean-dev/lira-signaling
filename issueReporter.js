@@ -1,3 +1,5 @@
+import { buildAttachmentLinks, attachmentMarkdown } from './reportAttachments.mjs'
+
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000 // 1 hora (limite de 5 chamadas por hora)
 const MAX_REQUESTS_PER_WINDOW = 5
 
@@ -8,6 +10,7 @@ export function createIssueReporterHandler({
   rateLimitWindowMs = RATE_LIMIT_WINDOW_MS,
   maxRequestsPerWindow = MAX_REQUESTS_PER_WINDOW,
   targetRepository,
+  attachmentBaseUrl,
 } = {}) {
   const clients = new Map()
 
@@ -163,6 +166,9 @@ export function createIssueReporterHandler({
         body = parts.join('\n')
       }
 
+      const attachments = buildAttachmentLinks(gistUrl, rawFiles, attachmentBaseUrl)
+      body += attachmentMarkdown(attachments)
+
       // 3. Criação da Issue no GitHub
       const issueRes = await fetcher(`https://api.github.com/repos/${targetRepo}/issues`, {
         method: 'POST',
@@ -195,6 +201,7 @@ export function createIssueReporterHandler({
           issueUrl: issueData.html_url,
           issueNumber: issueData.number,
           gistUrl: gistUrl || undefined,
+          attachments,
         })
       )
     } catch (err) {
