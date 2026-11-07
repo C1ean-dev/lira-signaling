@@ -13,6 +13,7 @@ const app = express()
 app.set('trust proxy', 1)
 app.all('/turn/credentials', createTurnCredentialsHandler())
 app.all('/report-issue', express.json({ limit: '10mb' }), createIssueReporterHandler())
+app.all('/report-issue/lira-clean', express.json({ limit: '10mb' }), createIssueReporterHandler({ targetRepository: 'C1ean-dev/lira-clean' }))
 const httpServer = createServer(app)
 let signalingSocketServer
 let signalingPath
