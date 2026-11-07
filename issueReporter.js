@@ -7,6 +7,7 @@ export function createIssueReporterHandler({
   now = Date.now,
   rateLimitWindowMs = RATE_LIMIT_WINDOW_MS,
   maxRequestsPerWindow = MAX_REQUESTS_PER_WINDOW,
+  targetRepository,
 } = {}) {
   const clients = new Map()
 
@@ -35,7 +36,8 @@ export function createIssueReporterHandler({
     }
 
     const token = env.GITHUB_REPORT_TOKEN || env.GITHUB_TOKEN
-    const targetRepo = env.GITHUB_REPO || 'C1ean-dev/Lira'
+    // Only the server chooses a repository. Never trust a body/query override.
+    const targetRepo = targetRepository || env.GITHUB_REPO || 'C1ean-dev/Lira'
 
     if (!token) {
       fail(503, 'Issue reporting service is not configured on backend')
