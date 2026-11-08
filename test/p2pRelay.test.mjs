@@ -24,6 +24,23 @@ test('public upstreams are rejected and an unconfigured relay returns 503',async
   const ws=new WebSocket(`ws://127.0.0.1:${server.address().port}/p2p/relay`);ws.on('error',()=>{})
   const status=await new Promise(resolve=>ws.on('unexpected-response',(_req,res)=>{res.resume();resolve(res.statusCode);ws.terminate()}));assert.equal(status,503)
 })
+
+test('Render Node forwards binary frames to its managed listener without an upstream environment variable',async t=>{
+  const backend=createServer(),wss=new WebSocketServer({server:backend})
+  wss.on('connection',ws=>ws.on('message',(data,binary)=>ws.send(data,{binary})))
+  await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve))
+  const env={RENDER:'true',LIRA_P2P_RELAY_LISTEN:`/ip4/127.0.0.1/tcp/${backend.address().port}/ws`}
+  const proxy=createServer();proxy.on('upgrade',createP2PRelayProxy({env}))
+  await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve))
+  t.after(()=>{for(const ws of wss.clients)ws.terminate();backend.close();proxy.close()})
+  const ws=new WebSocket(`ws://127.0.0.1:${proxy.address().port}/p2p/relay`)
+  await once(ws,'open')
+  const received=once(ws,'message'),payload=Buffer.from([0,255,17,128,0])
+  ws.send(payload)
+  const [data,binary]=await received
+  assert.equal(binary,true);assert.deepEqual(data,payload)
+  ws.close();await once(ws,'close')
+})
 test('the Render child uses a stable identity folder, native WS and the public TLS path',()=>{
   let captured,killed
   const child=new EventEmitter();child.kill=signal=>{killed=signal}

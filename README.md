@@ -146,8 +146,10 @@ selecionada precisa de **Contents: Read** no repositório privado
 essa permissão. `GITHUB_REPO` indica o repositório de issues e não é um token.
 O `postinstall` detecta `RENDER=true`, obtém uma revisão fixa do núcleo privado,
 instala as ferramentas de build necessárias e compila `relay/`. O servidor
-inicia esse executável automaticamente e anuncia seu endereço WSS. O fonte
-obtido e a credencial não são incluídos neste repositório público. Não use
+inicia esse executável automaticamente e anuncia seu endereço WSS.
+O proxy usa automaticamente a escuta local do relay (`127.0.0.1:9001` por padrão)
+na Render; `LIRA_P2P_RELAY_UPSTREAM` só é necessário para sobrescrever esse destino.
+O fonte obtido e a credencial não são incluídos neste repositório público. Não use
 `--ignore-scripts` no build da Render. A primeira compilação leva mais tempo.
 Sem uma credencial, o catálogo funciona, mas o relay permanece desativado e isso
 é informado nos logs. Adicionar a credencial exige refazer o deploy/build.
