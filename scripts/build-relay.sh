@@ -4,13 +4,14 @@ cd "$(dirname "$0")/.."
 
 # Keep the application's private Rust source out of this public repository.
 # The read-only token belongs in Render's environment, never in this repository.
-if [ -z "${LIRA_RELAY_SOURCE_TOKEN:-}" ]; then
-  echo 'Configure LIRA_RELAY_SOURCE_TOKEN com Contents: Read para C1ean-dev/lira-clean.' >&2
+relay_source_token="${LIRA_RELAY_SOURCE_TOKEN:-${GITHUB_RELEASES_TOKEN:-${GITHUB_REPORT_TOKEN:-${GITHUB_TOKEN:-}}}}"
+if [ -z "$relay_source_token" ]; then
+  echo 'Configure um token GitHub com Contents: Read para C1ean-dev/lira-clean.' >&2
   exit 1
 fi
 mkdir -p .build-tools/relay-source relay
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-  --header "Authorization: Bearer $LIRA_RELAY_SOURCE_TOKEN" \
+  --header "Authorization: Bearer $relay_source_token" \
   --header 'Accept: application/vnd.github+json' \
   'https://api.github.com/repos/C1ean-dev/lira-clean/tarball/3a336ecafc3737641ba7bdd05c6c67dd721b462f' \
   -o .build-tools/relay-source.tar.gz

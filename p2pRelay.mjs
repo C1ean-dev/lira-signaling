@@ -39,7 +39,7 @@ export function startManagedP2PRelay({env=process.env,spawnProcess=spawn}={}) {
   const bundled=fileURLToPath(new URL('./relay/target/release/lira-p2p-node',import.meta.url))
   const binary=env.LIRA_P2P_RELAY_BIN || (env.RENDER==='true' && existsSync(bundled) ? bundled : '')
   if(!binary){
-    if(env.RENDER==='true')console.warn('Catálogo P2P ativo; relay Rust não configurado. Adicione LIRA_RELAY_SOURCE_TOKEN e refaça o build com scripts npm habilitados.')
+    if(env.RENDER==='true')console.warn('Catálogo P2P ativo; relay Rust não configurado. Configure um token GitHub com leitura de lira-clean e refaça o build com scripts npm habilitados.')
     return ()=>{}
   }
   const advertise=env.LIRA_P2P_RELAY_ADVERTISE || (env.RENDER_EXTERNAL_HOSTNAME ? `/dns4/${env.RENDER_EXTERNAL_HOSTNAME}/tcp/443/tls/x-parity-ws/%2Fp2p%2Frelay` : '')

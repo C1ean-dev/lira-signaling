@@ -139,14 +139,17 @@ versions continue using PeerJS normally.
 ### Serviço Node existente na Render
 
 Mantenha o runtime **Node**, build `npm ci` (ou `npm install`) e start `npm start`.
-Configure na Render `LIRA_RELAY_SOURCE_TOKEN`: um token GitHub restrito ao
-repositório privado `C1ean-dev/lira-clean`, apenas com **Contents: Read**.
+O build reutiliza os tokens existentes, nesta ordem: `LIRA_RELAY_SOURCE_TOKEN`,
+`GITHUB_RELEASES_TOKEN`, `GITHUB_REPORT_TOKEN` e `GITHUB_TOKEN`. A credencial
+selecionada precisa de **Contents: Read** no repositório privado
+`C1ean-dev/lira-clean`. Não é necessário criar outro token se o atual já tem
+essa permissão. `GITHUB_REPO` indica o repositório de issues e não é um token.
 O `postinstall` detecta `RENDER=true`, obtém uma revisão fixa do núcleo privado,
 instala as ferramentas de build necessárias e compila `relay/`. O servidor
 inicia esse executável automaticamente e anuncia seu endereço WSS. O fonte
 obtido e a credencial não são incluídos neste repositório público. Não use
 `--ignore-scripts` no build da Render. A primeira compilação leva mais tempo.
-Sem a credencial, o catálogo funciona, mas o relay permanece desativado e isso
+Sem uma credencial, o catálogo funciona, mas o relay permanece desativado e isso
 é informado nos logs. Adicionar a credencial exige refazer o deploy/build.
 
 Depois do deploy, `/health` deve retornar 200, `/p2p/catalog/v1` deve retornar
