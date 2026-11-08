@@ -38,6 +38,17 @@ test('serves room discovery and existing PeerJS signaling on the same port', { t
   assert.equal(peer.first.type, 'OPEN')
   const http = await fetch(`http://127.0.0.1:${port}/`)
   assert.equal(http.status, 200)
+  const health = await fetch(`http://127.0.0.1:${port}/health`)
+  assert.equal(health.status, 200)
+  assert.deepEqual(await health.json(), { ok: true })
+  const catalog = await fetch(`http://127.0.0.1:${port}/p2p/catalog/v1`)
+  assert.equal(catalog.status, 200, 'the deployed server must expose the native catalog, not return 404')
+  assert.equal((await catalog.json()).version, 1)
+  const privateData = await fetch(`http://127.0.0.1:${port}/p2p/catalog/v1`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ version: 1, nodes: [], sources: [], roomSecret: 'must-not-be-published' }),
+  })
+  assert.equal(privateData.status, 400)
   const turn = await fetch(`http://127.0.0.1:${port}/turn/credentials`)
   assert.equal(turn.status, 503)
   assert.equal(turn.headers.get('cache-control'), 'no-store')

@@ -133,3 +133,49 @@ Deploy this version to the Render service together with the matching Lira app
 integration. The PeerJS signaling, WebSocket room discovery, TURN credentials,
 and issue reporting endpoints all run concurrently on a single port. Older app
 versions continue using PeerJS normally.
+
+## Catálogo nativo e relay WSS
+
+### Serviço Node existente na Render
+
+Mantenha o runtime **Node**, build `npm ci` (ou `npm install`) e start `npm start`.
+Configure na Render `LIRA_RELAY_SOURCE_TOKEN`: um token GitHub restrito ao
+repositório privado `C1ean-dev/lira-clean`, apenas com **Contents: Read**.
+O `postinstall` detecta `RENDER=true`, obtém uma revisão fixa do núcleo privado,
+instala as ferramentas de build necessárias e compila `relay/`. O servidor
+inicia esse executável automaticamente e anuncia seu endereço WSS. O fonte
+obtido e a credencial não são incluídos neste repositório público. Não use
+`--ignore-scripts` no build da Render. A primeira compilação leva mais tempo.
+Sem a credencial, o catálogo funciona, mas o relay permanece desativado e isso
+é informado nos logs. Adicionar a credencial exige refazer o deploy/build.
+
+Depois do deploy, `/health` deve retornar 200, `/p2p/catalog/v1` deve retornar
+JSON com `version: 1` e o catálogo deve ganhar o anúncio assinado do relay.
+Um catálogo vazio com HTTP 200 ainda não confirma que o relay está disponível.
+
+O estado padrão do Node fica em `.lira-p2p/relay`. Para conservar a identidade
+entre deploys, monte um disco persistente e aponte `LIRA_P2P_RELAY_DATA` para ele.
+`LIRA_P2P_CATALOG_FILE` pode apontar para o mesmo disco. Sem disco, os clientes
+precisam buscar o catálogo atualizado após uma troca de identidade do servidor.
+
+`GET /p2p/catalog/v1` entrega anúncios públicos assinados e temporários.
+`POST` recebe até 16 anúncios e oito fontes, valida a identidade Ed25519/PeerID,
+os endereços e a validade e retorna o catálogo. O cache tem até 128 nós e
+limite de 120 registros por minuto/IP. Não recebe convites ou chaves de salas.
+`LIRA_P2P_CATALOG_FILE` permite persistência opcional. Os clientes recompõem o
+cache em memória após um reinício se não houver disco persistente.
+
+`/p2p/relay` aceita upgrade WebSocket e encaminha os bytes ao upstream **local
+fixo** de `LIRA_P2P_RELAY_UPSTREAM`. Não escolhe destinos a partir da requisição.
+`LIRA_P2P_RELAY_BIN` inicia e supervisiona `lira-p2p-node`; preserve sua pasta de
+dados. Na Render, o host público vem de `RENDER_EXTERNAL_HOSTNAME`, TLS é
+terminado na borda e o nó anuncia o caminho seguro `/p2p/relay` e registra sua
+identidade nos catálogos. Outros provedores podem definir o endereço multiaddr
+em `LIRA_P2P_RELAY_ADVERTISE` e a URL de catálogo em `LIRA_P2P_CATALOG_URL`.
+
+O executável precisa ser compilado a partir da versão de `lira-clean` que contém
+WebSocket. `scripts/Prepare-Render-P2P.ps1` nesse projeto reúne as fontes do relay
+e deste serviço com um Dockerfile de múltiplos estágios. Use `/health` para o
+health check e armazenamento gravável/persistente em `/var/lib/lira`. As rotas
+PeerJS, salas, TURN, relatórios e atualizações permanecem disponíveis no mesmo
+servidor HTTP. `npm test` cobre o catálogo HTTP, o proxy binário e essas rotas.

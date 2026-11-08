@@ -2,3 +2,6 @@ node_modules/
 .env
 .env.local
 npm-debug.log*
+/relay/
+/.build-tools/
+/.lira-p2p/

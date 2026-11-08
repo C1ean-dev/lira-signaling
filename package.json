@@ -5,6 +5,7 @@
   "engines": { "node": ">=20" },
   "main": "server.js",
   "scripts": {
+    "postinstall": "node scripts/render-build.mjs",
     "start": "node server.js",
     "test": "node --test"
   },
