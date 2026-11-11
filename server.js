@@ -10,6 +10,7 @@ import { createNativeUpdates } from './nativeUpdates.mjs'
 import { createP2PCatalog, CATALOG_PATH } from './p2pCatalog.mjs'
 import { createP2PRelayProxy, startManagedP2PRelay } from './p2pRelay.mjs'
 import { createJoinPageRouter } from './joinPage.js'
+import { createLiraUpdates } from './liraUpdates.mjs'
 
 const port = process.env.PORT || 9000
 
@@ -17,6 +18,8 @@ const app = express()
 // Render terminates TLS and supplies the client address through one proxy.
 app.set('trust proxy', 1)
 app.use('/join', createJoinPageRouter())
+const liraUpdates = createLiraUpdates()
+app.use('/updates/lira', liraUpdates.router)
 app.all(CATALOG_PATH, express.json({limit:'128kb'}), createP2PCatalog())
 app.get('/health', (_req,res)=>res.json({ok:true}))
 app.all('/turn/credentials', createTurnCredentialsHandler())
@@ -56,7 +59,7 @@ httpServer.on('upgrade', (request, socket, head) => {
   if (!target) { socket.destroy(); return }
   target.handleUpgrade(request, socket, head, ws => target.emit('connection', ws, request))
 })
-httpServer.on('close', () => {rooms.close();stopRelay()})
+httpServer.on('close', () => {rooms.close();stopRelay();liraUpdates.close()})
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,()=>{stopRelay();httpServer.close(()=>process.exit(0));setTimeout(()=>process.exit(0),5000).unref()})
 server.on('error', error => console.error('[P2P Server]', error))
 roomsSocketServer.on('error', error => console.error('[Rooms Server]', error))
@@ -70,6 +73,9 @@ server.on('disconnect', (client) => {
 })
 
 httpServer.listen(Number(port), '0.0.0.0', () => {
+  if (process.env.LIRA_UPDATE_CACHE_DISABLED !== '1') {
+    void liraUpdates.start().catch(() => console.warn('[Lira Updates] Não foi possível iniciar o cache.'))
+  }
   stopRelay=startManagedP2PRelay()
   console.log(`Servidor de Sinalizacao Lira ativo na porta ${httpServer.address().port}`)
 })
