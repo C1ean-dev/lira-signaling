@@ -6,7 +6,7 @@ import WebSocket from 'ws'
 
 test('serves room discovery and existing PeerJS signaling on the same port', { timeout: 20000 }, async t => {
   const child = spawn(process.execPath, ['server.js'], {
-    cwd: new URL('../', import.meta.url), env: { ...process.env, CLOUDFLARE_TURN_KEY_ID: '', CLOUDFLARE_TURN_API_TOKEN: '', PORT: '0' }, windowsHide: true,
+    cwd: new URL('../', import.meta.url), env: { ...process.env, LIRA_UPDATE_CACHE_DISABLED: '1', CLOUDFLARE_TURN_KEY_ID: '', CLOUDFLARE_TURN_API_TOKEN: '', PORT: '0' }, windowsHide: true,
   })
   const sockets = []
   t.after(async () => {

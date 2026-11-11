@@ -29,6 +29,49 @@ Tests: `node --test test/joinPage.test.mjs test/server.test.mjs`.
 Browser checks after installing the development dependencies and a Playwright
 Chromium browser: `npm run test:join:browser`.
 
+## Lira application update cache
+
+`GET /updates/lira/latest` returns the last verified stable release from
+`C1ean-dev/Lira` using GitHub-compatible fields (`tag_name`, `name`, `body`,
+`html_url`, `assets`). Asset download URLs point to this Render service:
+`GET /updates/lira/assets/:assetId`. These routes are separate from the native
+`lira-clean` updater and do not change its behavior.
+
+On startup and once every 24 hours while running, the server checks GitHub's
+latest release. The last check time is saved on disk. Repeated client requests
+use the local cache and do not make GitHub requests. A failed daily check is
+also limited to once per 24 hours; the previous verified update remains usable.
+GitHub Actions do not need to be enabled: manually published releases work too.
+
+Windows EXE and Android APK installers are streamed to temporary files, checked
+against their declared size and GitHub SHA-256 digest when provided, then
+published atomically with the release metadata. The server computes a SHA-256
+even for older assets without a GitHub digest. It never exposes a partially
+downloaded release. While the first cache is preparing, metadata returns 503
+with `Retry-After: 30`. A stale valid cache still returns 200 with `stale: true`.
+Only the latest release and its predecessor are retained, allowing an app that
+already received the previous download URL to finish updating. Downloads
+support HEAD and byte ranges and do not require GitHub to be available.
+
+Optional configuration:
+
+- `LIRA_UPDATE_CACHE_DIR`: cache directory. Defaults to the OS temporary directory
+  under `lira-update-cache`. For persistence across Render restarts/deployments,
+  set it to a directory on an attached persistent disk, for example
+  `/var/data/lira-updates`. Render's default filesystem is ephemeral; without a
+  disk, a restart can require rebuilding the cache from GitHub. Free services
+  cannot attach persistent disks. See https://render.com/docs/disks and
+  https://render.com/docs/free.
+- `GITHUB_RELEASES_TOKEN` (or `GITHUB_TOKEN`): optional token for GitHub release
+  requests. Public releases work without a token. Credentials are used only for
+  requests to `api.github.com`, never forwarded to signed CDN URLs or clients.
+- `LIRA_UPDATE_CACHE_DISABLED=1`: disables the background task for isolated server
+  tests; it should not be set in the deployed service.
+
+Run `node --test test/liraUpdates.test.mjs test/server.test.mjs` to verify daily
+checks, local downloads, concurrent requests, restarts, corruption and failure
+recovery without fetching real release binaries.
+
 ## Public rooms
 
 Connect to `wss://lira-signaling.onrender.com/rooms`. The server sends
