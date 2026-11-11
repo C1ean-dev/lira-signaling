@@ -29,7 +29,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
   let lastFailure = null
   const headers = binary => {
     const value = { 'User-Agent': 'Lira-Update-Cache', Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json' }
-    const token = env.GITHUB_RELEASES_TOKEN || env.GITHUB_TOKEN
+    const token = env.GITHUB_RELEASES_TOKEN || env.GITHUB_TOKEN || env.GITHUB_REPORT_TOKEN
     if (token) value.Authorization = `Bearer ${token}`
     return value
   }

@@ -129,15 +129,18 @@ test('does not advertise an update when there is no valid cached installer', asy
 
 test('reports only sanitized upstream status and stage when GitHub rejects the initial request', async t => {
   const f = await fixture(t)
-  const cache = createLiraUpdates({ env: {}, directory: path.join(f.directory, 'http-failure'), warn: () => {},
-    fetch: async () => new Response('sensitive upstream body', { status: 403 }) })
+  let authorization
+  const cache = createLiraUpdates({ env: { GITHUB_REPORT_TOKEN: 'existing-server-credential' }, directory: path.join(f.directory, 'http-failure'), warn: () => {},
+    fetch: async (_url, options) => { authorization = options.headers.Authorization; return new Response('sensitive upstream body', { status: 403 }) } })
   await cache.refresh()
   const app = express(); app.use(cache.router)
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening')
   t.after(() => server.close())
   const body = await (await fetch(`http://127.0.0.1:${server.address().port}/latest`)).json()
   assert.deepEqual(body.failure, { stage: 'release_metadata', code: 'GITHUB_HTTP_403' })
+  assert.equal(authorization, 'Bearer existing-server-credential')
   assert.equal(JSON.stringify(body).includes('sensitive'), false)
+  assert.equal(JSON.stringify(body).includes('existing-server-credential'), false)
 })
 
 test('rejects a matching-length checksum failure and untrusted download redirects', async t => {

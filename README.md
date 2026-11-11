@@ -65,7 +65,7 @@ Optional configuration:
   disk, a restart can require rebuilding the cache from GitHub. Free services
   cannot attach persistent disks. See https://render.com/docs/disks and
   https://render.com/docs/free.
-- `GITHUB_RELEASES_TOKEN` (or `GITHUB_TOKEN`): optional token for GitHub release
+- `GITHUB_RELEASES_TOKEN` (or `GITHUB_TOKEN`, then `GITHUB_REPORT_TOKEN`): optional token for GitHub release
   requests. Public releases work without a token. Credentials are used only for
   requests to `api.github.com`, never forwarded to signed CDN URLs or clients.
 - `LIRA_UPDATE_CACHE_DISABLED=1`: disables the background task for isolated server
