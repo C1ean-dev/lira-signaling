@@ -15,7 +15,7 @@ export function createJoinPageRouter() {
     next()
   })
   router.get('/', (_req, res) => res.sendFile('index.html', { root: directory }))
-  for (const asset of ['invite.js', 'invite.css', 'logo.svg']) {
+  for (const asset of ['invite.js', 'launch.js', 'invite.css', 'logo.svg']) {
     router.get(`/${asset}`, (_req, res) => res.sendFile(asset, { root: directory }))
   }
   router.all('/', (_req, res) => res.set('Allow', 'GET, HEAD').status(405).end())

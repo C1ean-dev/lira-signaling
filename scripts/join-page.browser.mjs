@@ -5,6 +5,7 @@ import { once } from 'node:events'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
+import { gunzipSync } from 'node:zlib'
 import { chromium } from 'playwright'
 import { createJoinPageRouter } from '../joinPage.js'
 
@@ -24,6 +25,8 @@ test('HTTPS invitations open the bridge, preserve the app link and offer install
   page.setDefaultTimeout(5000)
   const requests = []
   const errors = []
+  await page.route('**/join/launch.js', route => route.fulfill({ contentType: 'text/javascript', body:
+    'export function launchNativeInvite(link){(window.attemptedNativeLinks ??= []).push(link)}' }))
   page.on('request', request => requests.push(request.url()))
   page.on('pageerror', error => errors.push(error.message))
   const invite = 'LIRA-ALL:' + Buffer.from(JSON.stringify({ version: 1, room: 'ROOM', signaling: 'render', direct: {
@@ -36,13 +39,12 @@ test('HTTPS invitations open the bridge, preserve the app link and offer install
   const native = new URL(await open.getAttribute('href'))
   assert.equal(native.protocol, 'lira:')
   assert.equal(native.searchParams.get('invite'), invite)
+  assert.deepEqual(await page.evaluate(() => window.attemptedNativeLinks), [native.href], 'loading the invitation automatically attempts to open Lira once')
   assert.equal(await page.getByRole('link', { name: 'Baixar Lira', exact: true }).getAttribute('href'), 'https://github.com/C1ean-dev/Lira/releases/latest')
   assert.equal(await page.getByRole('link', { name: 'Baixar Lira', exact: true }).getAttribute('target'), '_blank')
   assert.ok(requests.every(request => !request.includes('LIRA-ALL') && !request.includes('invite=')), 'the invitation must never be part of an HTTP request')
-  // Observe the trusted click without handing this test URL to the user's OS.
-  await open.evaluate(element => element.addEventListener('click', event => { event.preventDefault(); window.clickedInvite = element.href }, { once: true }))
   await open.click()
-  assert.equal(await page.evaluate(() => window.clickedInvite), native.href)
+  assert.deepEqual(await page.evaluate(() => window.attemptedNativeLinks), [native.href, native.href], 'the button retries with a user gesture when automatic opening is blocked')
   await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
     async writeText(value) { window.copiedInvite = value },
   } }))
@@ -58,6 +60,17 @@ test('HTTPS invitations open the bridge, preserve the app link and offer install
     assert.ok(await open.isVisible())
     await page.screenshot({ path: path.join(screenshots, `${width}.png`), fullPage: true })
   }
+  const longInvite = 'LIRA-ALL:' + Buffer.from(JSON.stringify({ version: 1, room: 'ROOM', signaling: 'render', direct: {
+    version: 1, kind: 'offer', room: 'ROOM', session: 'long-session', host: 'lira-ROOM-host', guest: 'lira-ROOM-peer-Guest',
+    expiresAt: Date.now() + 600000, description: { type: 'offer', sdp: 'v=0\r\n' + 'a=candidate:MixedCASE 192.168.1.20\r\n'.repeat(60) },
+  } })).toString('base64url')
+  await page.goto(origin + '/join#invite=' + encodeURIComponent(longInvite))
+  await open.waitFor()
+  const packed = new URL(await open.getAttribute('href'))
+  assert.ok(packed.href.length < 2081)
+  assert.equal(gunzipSync(Buffer.from(packed.searchParams.get('inviteGzip'), 'base64url')).toString('utf8'), longInvite)
+  assert.equal(await page.evaluate(() => window.attemptedNativeLinks.at(-1)), packed.href)
+  assert.equal(await page.evaluate(() => window.attemptedNativeLinks.length), 2, 'changing to a new invitation attempts it once')
   const expired = 'LIRA-ALL:' + Buffer.from(JSON.stringify({ version: 1, room: 'ROOM', direct: {
     version: 1, kind: 'offer', session: 'expired-session', room: 'ROOM', host: 'lira-ROOM-host',
     guest: 'lira-ROOM-peer-Guest', expiresAt: 1, description: { type: 'offer', sdp: 'v=0' },
