@@ -49,6 +49,9 @@ published atomically with the release metadata. The server computes a SHA-256
 even for older assets without a GitHub digest. It never exposes a partially
 downloaded release. While the first cache is preparing, metadata returns 503
 with `Retry-After: 30`. A stale valid cache still returns 200 with `stale: true`.
+If initialization fails, the 503 response includes the failed stage and a safe
+error code, plus `Retry-After` until the next daily attempt. Upstream bodies,
+signed URLs and credentials are never included in this diagnostic.
 Only the latest release and its predecessor are retained, allowing an app that
 already received the previous download URL to finish updating. Downloads
 support HEAD and byte ranges and do not require GitHub to be available.

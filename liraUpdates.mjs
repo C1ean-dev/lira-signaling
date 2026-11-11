@@ -25,6 +25,8 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
   const stateFile = path.join(directory, 'cache.json')
   let state = { lastCheckedAt: 0, lastSuccessfulAt: 0, release: null, previous: null }
   let loading, pending, timer
+  let phase = 'idle'
+  let lastFailure = null
   const headers = binary => {
     const value = { 'User-Agent': 'Lira-Update-Cache', Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json' }
     const token = env.GITHUB_RELEASES_TOKEN || env.GITHUB_TOKEN
@@ -69,7 +71,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
   }
   async function metadata() {
     const response = await fetcher(`${API}/releases/latest`, { headers: headers(false), redirect: 'error', signal: AbortSignal.timeout(15000) })
-    if (!response.ok) throw new Error('release unavailable')
+    if (!response.ok) throw Object.assign(new Error('release unavailable'), { code: `GITHUB_HTTP_${response.status}` })
     const chunks = []; let bytes = 0
     for await (const chunk of response.body) {
       bytes += chunk.length
@@ -89,6 +91,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
       html_url: `https://github.com/C1ean-dev/Lira/releases/tag/${release.tag_name}`, assets }
   }
   async function cacheAsset(asset) {
+    phase = asset.name.endsWith('.apk') ? 'android_installer' : 'windows_installer'
     const old = [state.release, state.previous].flatMap(release => release?.assets || []).find(item =>
       item.id === asset.id && item.size === asset.size && (!asset.digest || asset.digest === `sha256:${item.sha256}`))
     if (old) return { ...old, name: asset.name }
@@ -101,7 +104,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
       // Signed asset URLs must never receive the GitHub token.
       response = await fetcher(redirect.href, { redirect: 'error', signal: AbortSignal.timeout(180000) })
     }
-    if (response.status !== 200 || !response.body) throw new Error('installer unavailable')
+    if (response.status !== 200 || !response.body) throw Object.assign(new Error('installer unavailable'), { code: `GITHUB_HTTP_${response.status}` })
     const temporary = path.join(directory, `${asset.id}-${randomUUID()}.tmp`)
     let bytes = 0
     const hash = createHash('sha256')
@@ -130,9 +133,11 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     if (pending) return pending
     if (state.lastCheckedAt && now() - state.lastCheckedAt < UPDATE_INTERVAL_MS) return
     pending = (async () => {
+      phase = 'cache_storage'
       state.lastCheckedAt = now()
-      await persist(state)
       try {
+        await persist(state)
+        phase = 'release_metadata'
         const release = await metadata()
         const assets = []
         for (const asset of release.assets) assets.push(await cacheAsset(asset))
@@ -140,11 +145,18 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
         const next = { ...state, lastSuccessfulAt: now(), release: { ...release, assets },
           previous: changed ? state.release : state.previous }
         // Publish metadata only after all files are verified and ready to serve.
+        phase = 'publish_cache'
         await persist(next)
         state = next
-      } catch {
-        warn('[Lira Updates] Consulta diária falhou; a última atualização válida foi preservada.')
+        lastFailure = null
+      } catch (error) {
+        const code = /^(GITHUB_HTTP_\d{3}|EACCES|EPERM|ENOSPC|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN)$/.test(error.code || '')
+          ? error.code : /^(invalid release|no installers|invalid installer|invalid redirect|installer verification failed|installer too large|release too large)$/.test(error.message)
+            ? error.message.replaceAll(' ', '_') : error.name === 'TimeoutError' ? 'upstream_timeout' : 'cache_refresh_failed'
+        lastFailure = { stage: phase, code }
+        warn(`[Lira Updates] Consulta diária falhou em ${phase} (${code}); a última atualização válida foi preservada.`)
       } finally {
+        phase = 'idle'
         // Failed multi-file refreshes must not accumulate unpublished installers.
         await cleanup().catch(() => {})
       }
@@ -164,7 +176,13 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     try {
       await load()
       void refresh().catch(() => warn('[Lira Updates] Não foi possível preparar o cache.'))
-      if (!state.release) { res.setHeader('Retry-After', '30'); res.status(503).json({ error: 'update_cache_unavailable' }); return }
+      if (!state.release) {
+        const seconds = pending ? 30 : Math.max(30, Math.ceil((state.lastCheckedAt + UPDATE_INTERVAL_MS - now()) / 1000))
+        res.setHeader('Retry-After', String(seconds))
+        res.status(503).json({ error: 'update_cache_unavailable', status: pending ? 'preparing' : 'unavailable',
+          stage: phase, last_checked_at: state.lastCheckedAt ? new Date(state.lastCheckedAt).toISOString() : null, failure: lastFailure })
+        return
+      }
       res.json({ ...state.release, checked_at: new Date(state.lastSuccessfulAt).toISOString(),
         stale: now() - state.lastSuccessfulAt >= UPDATE_INTERVAL_MS,
         assets: state.release.assets.map(asset => ({ id: asset.id, name: asset.name, size: asset.size,
