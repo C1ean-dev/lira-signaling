@@ -4,6 +4,27 @@ Run `npm install` and `npm start` on Node.js 20 or newer. The server listens on
 `PORT` (9000 by default), preserving PeerJS HTTP routes and the `/peerjs`
 WebSocket endpoint. No database or additional Render service is required.
 
+## HTTPS space invitations
+
+`GET /join` serves the standalone invitation page, with its assets under `/join/`.
+Share links shaped as `https://lira-signaling.onrender.com/join#invite=...`.
+The fragment contains the original invitation with its casing preserved; it is
+read only by the visitor's browser, without sending SDP, addresses or credentials
+to the HTTP server. No database, new secret or other service is needed.
+
+The page offers **Abrir no Lira**, a user-initiated `lira://join?invite=...` link,
+and the official Lira download page. Visitors without the app can install it,
+return to the same page and open the invitation. The browser may ask to confirm
+launching the application. Expired direct-only invitations request a new link;
+complete invitations with signaling or IPv6 routes remain usable. The installed
+app must include support for the `lira://` protocol.
+
+This endpoint does not register peers or rooms and does not alter the existing
+PeerJS, `/rooms`, `/turn/credentials`, reporting, native updates or P2P routes.
+Tests: `node --test test/joinPage.test.mjs test/server.test.mjs`.
+Browser checks after installing the development dependencies and a Playwright
+Chromium browser: `npm run test:join:browser`.
+
 ## Public rooms
 
 Connect to `wss://lira-signaling.onrender.com/rooms`. The server sends
