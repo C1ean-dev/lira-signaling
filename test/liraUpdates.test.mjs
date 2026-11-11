@@ -16,7 +16,7 @@ function release(version = 1) {
     assets: [{ id: version * 10, name: `Lira.Setup.1.0.${version}.exe`, state: 'uploaded', size: binary.length, digest: digest(binary) },
       { id: version * 10 + 1, name: `Lira-v1.0.${version}.apk`, state: 'uploaded', size: apk.length, digest: digest(apk) }], binary, apk }
 }
-async function fixture(t) {
+async function fixture(t, publishToken = 'publisher-secret') {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lira-cache-test-'))
   const calls = []; const warnings = []
   let clock = 1794400000000; let latest = release(); let offline = false; let badBinary = false; let signedHeaders
@@ -28,7 +28,7 @@ async function fixture(t) {
     signedHeaders = options.headers
     return new Response(badBinary ? Buffer.from('invalid') : url.endsWith(String(latest.assets[0].id)) ? latest.binary : latest.apk)
   }
-  const make = () => createLiraUpdates({ directory, fetch: fetcher, now: () => clock, env: { GITHUB_RELEASES_TOKEN: 'test-secret' }, warn: line => warnings.push(line) })
+  const make = () => createLiraUpdates({ directory, fetch: fetcher, now: () => clock, env: { GITHUB_RELEASES_TOKEN: 'test-secret', LIRA_UPDATE_PUBLISH_TOKEN: publishToken }, warn: line => warnings.push(line) })
   let cache = make()
   const app = express()
   app.use('/updates/lira', (req, res, next) => cache.router(req, res, next))
@@ -45,6 +45,51 @@ async function fixture(t) {
     offline: () => { offline = true }, badBinary: () => { badBinary = true }, signedHeaders: () => signedHeaders,
     restart: () => { cache.close(); cache = make() } }
 }
+
+const publish = (origin, tag = 'v1.0.2', token = 'publisher-secret') => fetch(origin + '/refresh', {
+  method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ tag_name: tag }),
+})
+
+test('authenticated publication refreshes both installers immediately and is idempotent', async t => {
+  const f = await fixture(t)
+  await f.cache.refresh()
+  f.setRelease(release(2))
+  const response = await publish(f.origin)
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { status: 'ready', tag_name: 'v1.0.2' })
+  assert.equal((await (await fetch(f.origin + '/latest')).json()).tag_name, 'v1.0.2')
+  assert.deepEqual(Buffer.from(await (await fetch(f.origin + '/assets/21')).arrayBuffer()), f.latest.apk)
+  const count = f.calls.length
+  assert.equal((await publish(f.origin)).status, 200)
+  assert.equal(f.calls.length, count)
+  await f.cache.refresh()
+  assert.equal(f.calls.length, count, 'normal checks still respect the daily interval')
+})
+
+test('publication requires a configured secret and rejects unauthorized or invalid requests before fetching', async t => {
+  const f = await fixture(t)
+  for (const token of ['', 'wrong', 'test-secret']) assert.equal((await publish(f.origin, 'v1.0.2', token)).status, 401)
+  assert.equal((await publish(f.origin, '../invalid')).status, 400)
+  assert.equal(f.calls.length, 0)
+  const unconfigured = await fixture(t, '')
+  assert.equal((await publish(unconfigured.origin)).status, 503)
+  assert.equal(unconfigured.calls.length, 0)
+})
+
+test('failed or mismatched publication preserves the previous verified release and can retry immediately', async t => {
+  const f = await fixture(t)
+  await f.cache.refresh()
+  assert.equal((await publish(f.origin)).status, 502, 'latest GitHub release must match the requested tag')
+  const bad = release(2); bad.assets[1].digest = 'sha256:' + '0'.repeat(64)
+  f.setRelease(bad)
+  const failed = await publish(f.origin)
+  assert.equal(failed.status, 502)
+  assert.equal((await failed.text()).includes('secret'), false)
+  assert.equal((await (await fetch(f.origin + '/latest')).json()).tag_name, 'v1.0.1')
+  f.setRelease(release(2))
+  assert.equal((await publish(f.origin)).status, 200)
+})
 
 test('downloads and verifies both installers once, then serves repeated checks and downloads from disk', async t => {
   const f = await fixture(t)

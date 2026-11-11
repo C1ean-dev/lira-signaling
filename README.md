@@ -43,6 +43,20 @@ use the local cache and do not make GitHub requests. A failed daily check is
 also limited to once per 24 hours; the previous verified update remains usable.
 GitHub Actions do not need to be enabled: manually published releases work too.
 
+The local Lira publisher calls `POST /updates/lira/refresh` after making both
+installers public on GitHub. Set the same random `LIRA_UPDATE_PUBLISH_TOKEN` secret
+on this service and in Lira's ignored `.env.release.local`. Requests must send
+`Authorization: Bearer <token>` and JSON `{ "tag_name": "v1.1.208" }`.
+The route bypasses the daily interval, verifies that GitHub's latest release
+matches that tag and includes both EXE and APK, and replies with
+`{ "status": "ready", "tag_name": "v1.1.208" }` only after both installers are
+verified and stored. Repeating a completed request does not download again.
+It never accepts uploaded binaries or external download URLs.
+An unconfigured service returns 503, an invalid token 401, an invalid tag 400,
+and a failed/mismatched refresh 502. Failures preserve the previous cache and
+authorized requests may retry immediately. Ordinary app checks still use the
+daily cache. Deploy this server change before using the updated Lira publisher.
+
 Windows EXE and Android APK installers are streamed to temporary files, checked
 against their declared size and GitHub SHA-256 digest when provided, then
 published atomically with the release metadata. The server computes a SHA-256

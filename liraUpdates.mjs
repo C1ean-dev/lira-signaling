@@ -1,5 +1,5 @@
 import express from 'express'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -128,10 +128,10 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
       if (/^\d+-[a-f0-9]{64}\.bin$/.test(file) && !keep.has(file)) await fs.unlink(path.join(directory, file)).catch(() => {})
     }
   }
-  async function refresh() {
+  async function refresh({ force = false, tagName } = {}) {
     await load()
     if (pending) return pending
-    if (state.lastCheckedAt && now() - state.lastCheckedAt < UPDATE_INTERVAL_MS) return
+    if (!force && state.lastCheckedAt && now() - state.lastCheckedAt < UPDATE_INTERVAL_MS) return
     pending = (async () => {
       phase = 'cache_storage'
       state.lastCheckedAt = now()
@@ -139,6 +139,9 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
         await persist(state)
         phase = 'release_metadata'
         const release = await metadata()
+        if (tagName && release.tag_name !== tagName) throw new Error('invalid release')
+        if (tagName && (!release.assets.some(asset => asset.name.toLowerCase().endsWith('.exe')) ||
+            !release.assets.some(asset => asset.name.toLowerCase().endsWith('.apk')))) throw new Error('no installers')
         const assets = []
         for (const asset of release.assets) assets.push(await cacheAsset(asset))
         const changed = JSON.stringify(assets) !== JSON.stringify(state.release?.assets)
@@ -171,6 +174,28 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     next()
   })
   router.options('*', (_req, res) => res.sendStatus(204))
+  router.post('/refresh', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store')
+    const token = env.LIRA_UPDATE_PUBLISH_TOKEN
+    if (!token?.trim()) { res.status(503).json({ error: 'publication_not_configured' }); return }
+    const hash = value => createHash('sha256').update(value).digest()
+    if (!timingSafeEqual(hash(req.get('authorization') || ''), hash(`Bearer ${token}`))) {
+      res.status(401).json({ error: 'unauthorized' }); return
+    }
+    next()
+  }, express.json({ limit: '1kb' }), async (req, res) => {
+    const tagName = req.body?.tag_name
+    if (typeof tagName !== 'string' || !VERSION.test(tagName)) { res.status(400).json({ error: 'invalid_tag' }); return }
+    try {
+      await load()
+      // A background refresh may still be downloading the previous release.
+      if (pending) await pending
+      const ready = () => state.release?.tag_name === tagName && state.release.assets.length === 2
+      if (!ready()) await refresh({ force: true, tagName })
+      if (!ready()) { res.status(502).json({ error: 'publication_not_ready' }); return }
+      res.json({ status: 'ready', tag_name: tagName })
+    } catch { res.status(502).json({ error: 'publication_failed' }) }
+  })
   router.get('/latest', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store')
     try {
