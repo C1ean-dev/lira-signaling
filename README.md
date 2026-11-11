@@ -12,12 +12,16 @@ The fragment contains the original invitation with its casing preserved; it is
 read only by the visitor's browser, without sending SDP, addresses or credentials
 to the HTTP server. No database, new secret or other service is needed.
 
-The page offers **Abrir no Lira**, a user-initiated `lira://join?invite=...` link,
-and the official Lira download page. Visitors without the app can install it,
+The page automatically attempts to open Lira once for each invitation and offers
+**Abrir no Lira** to retry with a user gesture when the browser requires one.
+Small invitations use `lira://join?invite=...`; larger ones use gzip with
+`lira://join?inviteGzip=...` to stay within Windows' 2081-character external-URL
+limit. The HTTPS fragment and copied original invitation remain unchanged.
+The page also offers the official Lira download page. Visitors without the app can install it,
 return to the same page and open the invitation. The browser may ask to confirm
 launching the application. Expired direct-only invitations request a new link;
 complete invitations with signaling or IPv6 routes remain usable. The installed
-app must include support for the `lira://` protocol.
+app must include support for the `lira://` protocol and compressed invitations.
 
 This endpoint does not register peers or rooms and does not alter the existing
 PeerJS, `/rooms`, `/turn/credentials`, reporting, native updates or P2P routes.

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import { gunzipSync } from 'node:zlib'
 import { once } from 'node:events'
 import { createJoinPageRouter } from '../joinPage.js'
 import { nativeInviteLink, readInvitation } from '../join-page/invite.js'
@@ -28,7 +29,7 @@ test('the isolated HTTPS bridge serves its page and assets without adding state 
   assert.match(html, /Abrir no Lira/)
   assert.match(html, /https:\/\/github.com\/C1ean-dev\/Lira\/releases\/latest/)
   assert.match(html, /property="og:title"/)
-  for (const file of ['invite.js', 'invite.css', 'logo.svg']) assert.equal((await fetch(origin + '/join/' + file)).status, 200)
+  for (const file of ['invite.js', 'launch.js', 'invite.css', 'logo.svg']) assert.equal((await fetch(origin + '/join/' + file)).status, 200)
   const head = await fetch(origin + '/join', { method: 'HEAD' })
   assert.equal(head.status, 200)
   assert.equal(await head.text(), '')
@@ -37,12 +38,12 @@ test('the isolated HTTPS bridge serves its page and assets without adding state 
   assert.deepEqual(await (await fetch(origin + '/existing')).json(), { ok: true })
 })
 
-test('the bridge preserves a complete invitation with all its case-sensitive routes', () => {
+test('the bridge preserves a complete invitation with all its case-sensitive routes', async () => {
   const now = Date.now()
   const invite = encode('LIRA-ALL:', { version: 1, room: 'ROOM', signaling: 'render',
     ipv6: { addresses: ['[2001:db8::20]'], port: 9000 }, direct: offer(now) })
   assert.equal(readInvitation(fragment(invite), now), invite)
-  assert.equal(new URL(nativeInviteLink(invite)).searchParams.get('invite'), invite)
+  assert.equal(new URL(await nativeInviteLink(invite)).searchParams.get('invite'), invite)
   // A route through signaling remains usable after the direct offer expires.
   assert.equal(readInvitation(fragment(invite), now + 600001), invite)
 })
@@ -67,4 +68,14 @@ test('untrusted fragments cannot select another protocol, inject markup or start
   }
   assert.throws(() => readInvitation(fragment(encode('LIRA-LAN:', { room: 'ROOM', host: 'evil/path', port: 9000 }))), /inválido/)
   assert.throws(() => readInvitation(fragment(encode('LIRA-DIRECT:', { ...offer(Date.now()), kind: 'answer' }))), /inválido/)
+})
+
+test('long complete invitations fit the Windows external URL limit', async () => {
+  const data = offer(Date.now())
+  data.description.sdp += 'a=candidate:1234 1 udp 2122260223 192.168.1.20 63616 typ host generation 0\r\n'.repeat(40)
+  const invite = encode('LIRA-ALL:', { version: 1, room: 'ROOM', direct: data })
+  assert.ok(invite.length > 2081)
+  const link = await nativeInviteLink(invite)
+  assert.ok(link.length <= 2081)
+  assert.equal(gunzipSync(Buffer.from(new URL(link).searchParams.get('inviteGzip'), 'base64url')).toString('utf8'), invite)
 })

@@ -1,3 +1,5 @@
+import { launchNativeInvite } from './launch.js'
+
 const MAX_LENGTH = 30000
 const ROOM = /^[A-Z0-9][A-Z0-9_-]{0,99}$/
 const invalid = () => new Error('O convite está incompleto ou inválido. Peça um novo link a quem convidou você.')
@@ -28,7 +30,7 @@ export function readInvitation(hash, now = Date.now()) {
   const params = new URLSearchParams(hash.replace(/^#/, ''))
   const invite = params.get('invite')
   if (!invite || params.getAll('invite').length !== 1 || [...params.keys()].some(key => key !== 'invite')) throw invalid()
-  if (nativeInviteLink(invite).length > MAX_LENGTH) throw invalid()
+  if (`lira://join?invite=${encodeURIComponent(invite)}`.length > MAX_LENGTH) throw invalid()
   if (ROOM.test(invite)) return invite
   const match = /^(LIRA-ALL:|LIRA-LAN:|LIRA-DIRECT:)([A-Za-z0-9_-]+)$/.exec(invite)
   if (!match) throw invalid()
@@ -55,8 +57,17 @@ export function readInvitation(hash, now = Date.now()) {
   return invite
 }
 
-export function nativeInviteLink(invite) {
-  return `lira://join?invite=${encodeURIComponent(invite)}`
+export async function nativeInviteLink(invite) {
+  const raw = `lira://join?invite=${encodeURIComponent(invite)}`
+  if (raw.length <= 2081) return raw
+  const stream = new Blob([invite]).stream().pipeThrough(new CompressionStream('gzip'))
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer())
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  const packed = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const link = `lira://join?inviteGzip=${packed}`
+  if (link.length > 2081) throw new Error('Este convite é grande demais para abrir pelo navegador. Use Copiar convite e cole no Lira.')
+  return link
 }
 
 if (typeof document !== 'undefined') {
@@ -64,20 +75,37 @@ if (typeof document !== 'undefined') {
   const copy = document.getElementById('copy-invite')
   const status = document.getElementById('status')
   let invite = ''
-  const load = () => {
+  let generation = 0
+  let attemptedHash = ''
+  const launch = () => {
+    try {
+      readInvitation(window.location.hash)
+      status.textContent = 'Tentando abrir o Lira. Confirme a abertura se o navegador solicitar. Se não abrir, instale ou atualize o aplicativo e tente novamente.'
+      launchNativeInvite(open.href)
+    } catch (error) { status.textContent = error.message }
+  }
+  const load = async () => {
+    const current = ++generation
     open.hidden = true
     copy.hidden = true
     open.removeAttribute('href')
     document.body.classList.remove('error')
     try {
       invite = readInvitation(window.location.hash)
-      open.href = nativeInviteLink(invite)
-      open.hidden = false
       copy.hidden = false
+      const href = await nativeInviteLink(invite)
+      if (current !== generation) return
+      open.href = href
+      open.hidden = false
       document.getElementById('title').textContent = 'Seu espaço está a um clique.'
       document.getElementById('description').textContent = 'Você recebeu um convite para o Lira. Abra o aplicativo para entrar no espaço.'
       status.textContent = 'Se o navegador pedir uma confirmação, escolha Abrir Lira.'
+      if (attemptedHash !== window.location.hash) {
+        attemptedHash = window.location.hash
+        launch()
+      }
     } catch (error) {
+      if (current !== generation) return
       invite = ''
       document.body.classList.add('error')
       document.getElementById('title').textContent = 'Vamos conferir seu convite.'
@@ -86,12 +114,12 @@ if (typeof document !== 'undefined') {
     }
   }
   open.addEventListener('click', event => {
+    event.preventDefault()
     try {
       // Recheck expiration if installation took longer than the direct offer's lifetime.
       invite = readInvitation(window.location.hash)
-      open.href = nativeInviteLink(invite)
-      status.textContent = 'Confirme a abertura do Lira no navegador. Se ele não abrir, instale a versão atual e tente novamente.'
-    } catch { event.preventDefault(); load() }
+      launch()
+    } catch { void load() }
   })
   copy.addEventListener('click', async () => {
     try {
