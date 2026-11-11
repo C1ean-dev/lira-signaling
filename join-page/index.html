@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="description" content="Você recebeu um convite para um espaço no Lira. Abra o aplicativo ou baixe o Lira para participar.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Vamos nos encontrar no Lira">
+  <meta property="og:description" content="Abra seu convite e entre no espaço pelo aplicativo Lira.">
+  <meta property="og:image" content="https://lira-signaling.onrender.com/join/logo.svg">
+  <meta name="theme-color" content="#0c0e14">
+  <title>Seu convite para o Lira</title>
+  <link rel="icon" href="/join/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/join/invite.css">
+  <script type="module" src="/join/invite.js"></script>
+</head>
+<body>
+  <header class="brand"><img src="/join/logo.svg" alt="" width="40" height="40"><span>LIRA<small>Espaço Virtual</small></span></header>
+  <main>
+    <div class="invitation-symbol" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path d="M10 40h28M15 40V10l18-3v33M22 25h1" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h1 id="title">Seu espaço está a um clique.</h1>
+    <p id="description" class="intro">Você recebeu um convite para o Lira.<br>Abra o aplicativo para entrar no espaço.</p>
+    <a id="open-lira" class="button primary" hidden>Abrir no Lira <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M7 7h10v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <p id="status" role="status" class="status">Lendo convite…</p>
+    <button id="copy-invite" class="copy" type="button" hidden>Copiar convite para colar no Lira</button>
+    <div class="download">
+      <h2>Ainda não tem o aplicativo?</h2>
+      <p>Baixe e instale o Lira. Depois, volte a esta página e clique em <strong>Abrir no Lira</strong>.</p>
+      <a class="button secondary" href="https://github.com/C1ean-dev/Lira/releases/latest" target="_blank" rel="noopener noreferrer">Baixar Lira <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m-5-5 5 5 5-5M5 17v4h14v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    </div>
+    <noscript><p class="notice">Ative o JavaScript para abrir este convite. Você também pode colar o link completo em <strong>Conectar → Código da sala</strong> no Lira atualizado.</p></noscript>
+  </main>
+  <footer>Seu convite continua nesta página enquanto você instala.</footer>
+</body>
+</html>

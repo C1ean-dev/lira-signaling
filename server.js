@@ -9,12 +9,14 @@ import { createReportAttachmentHandler } from './reportAttachments.mjs'
 import { createNativeUpdates } from './nativeUpdates.mjs'
 import { createP2PCatalog, CATALOG_PATH } from './p2pCatalog.mjs'
 import { createP2PRelayProxy, startManagedP2PRelay } from './p2pRelay.mjs'
+import { createJoinPageRouter } from './joinPage.js'
 
 const port = process.env.PORT || 9000
 
 const app = express()
 // Render terminates TLS and supplies the client address through one proxy.
 app.set('trust proxy', 1)
+app.use('/join', createJoinPageRouter())
 app.all(CATALOG_PATH, express.json({limit:'128kb'}), createP2PCatalog())
 app.get('/health', (_req,res)=>res.json({ok:true}))
 app.all('/turn/credentials', createTurnCredentialsHandler())
