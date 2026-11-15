@@ -13,6 +13,14 @@ const VERSION = /^v?\d+\.\d+\.\d+$/
 const MAX_ASSET_BYTES = 512 * 1024 * 1024
 const BASE_URL = 'https://lira-signaling.onrender.com/updates/lira'
 const validId = value => Number.isSafeInteger(value) && value > 0
+const isNewerVersion = (latest, current) => {
+  const parts = value => value.replace(/^v/i, '').split('.').map(BigInt)
+  const left = parts(latest), right = parts(current)
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i]) return left[i] > right[i]
+  }
+  return false
+}
 const hashOf = async file => {
   const hash = createHash('sha256')
   for await (const chunk of createReadStream(file)) hash.update(chunk)
@@ -142,11 +150,16 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
         if (tagName && release.tag_name !== tagName) throw new Error('invalid release')
         if (tagName && (!release.assets.some(asset => asset.name.toLowerCase().endsWith('.exe')) ||
             !release.assets.some(asset => asset.name.toLowerCase().endsWith('.apk')))) throw new Error('no installers')
-        const assets = []
-        for (const asset of release.assets) assets.push(await cacheAsset(asset))
-        const changed = JSON.stringify(assets) !== JSON.stringify(state.release?.assets)
-        const next = { ...state, lastSuccessfulAt: now(), release: { ...release, assets },
-          previous: changed ? state.release : state.previous }
+        let next = { ...state, lastSuccessfulAt: now() }
+        // App checks keep equal or older versions untouched. The authenticated
+        // publisher may finish a release cached before its second installer was uploaded.
+        const newer = !state.release || isNewerVersion(release.tag_name, state.release.tag_name)
+        const completePublication = tagName && state.release?.tag_name === tagName && state.release.assets.length < release.assets.length
+        if (newer || completePublication) {
+          const assets = []
+          for (const asset of release.assets) assets.push(await cacheAsset(asset))
+          next = { ...next, release: { ...release, assets }, previous: newer ? state.release : state.previous }
+        }
         // Publish metadata only after all files are verified and ready to serve.
         phase = 'publish_cache'
         await persist(next)
@@ -157,7 +170,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
           ? error.code : /^(invalid release|no installers|invalid installer|invalid redirect|installer verification failed|installer too large|release too large)$/.test(error.message)
             ? error.message.replaceAll(' ', '_') : error.name === 'TimeoutError' ? 'upstream_timeout' : 'cache_refresh_failed'
         lastFailure = { stage: phase, code }
-        warn(`[Lira Updates] Consulta diária falhou em ${phase} (${code}); a última atualização válida foi preservada.`)
+        warn(`[Lira Updates] Consulta falhou em ${phase} (${code}); a última atualização válida foi preservada.`)
       } finally {
         phase = 'idle'
         // Failed multi-file refreshes must not accumulate unpublished installers.
@@ -200,16 +213,17 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     res.setHeader('Cache-Control', 'no-store')
     try {
       await load()
-      void refresh().catch(() => warn('[Lira Updates] Não foi possível preparar o cache.'))
+      // Every app check verifies GitHub, sharing any refresh already in progress.
+      // Do not return the old release while newer installers are still downloading.
+      await refresh({ force: true })
       if (!state.release) {
-        const seconds = pending ? 30 : Math.max(30, Math.ceil((state.lastCheckedAt + UPDATE_INTERVAL_MS - now()) / 1000))
-        res.setHeader('Retry-After', String(seconds))
+        res.setHeader('Retry-After', '30')
         res.status(503).json({ error: 'update_cache_unavailable', status: pending ? 'preparing' : 'unavailable',
           stage: phase, last_checked_at: state.lastCheckedAt ? new Date(state.lastCheckedAt).toISOString() : null, failure: lastFailure })
         return
       }
       res.json({ ...state.release, checked_at: new Date(state.lastSuccessfulAt).toISOString(),
-        stale: now() - state.lastSuccessfulAt >= UPDATE_INTERVAL_MS,
+        stale: lastFailure !== null || now() - state.lastSuccessfulAt >= UPDATE_INTERVAL_MS,
         assets: state.release.assets.map(asset => ({ id: asset.id, name: asset.name, size: asset.size,
           digest: `sha256:${asset.sha256}`, browser_download_url: `${baseUrl}/assets/${asset.id}` })) })
     } catch { res.status(503).json({ error: 'update_cache_unavailable' }) }

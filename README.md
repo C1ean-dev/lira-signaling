@@ -37,10 +37,12 @@ Chromium browser: `npm run test:join:browser`.
 `GET /updates/lira/assets/:assetId`. These routes are separate from the native
 `lira-clean` updater and do not change its behavior.
 
-On startup and once every 24 hours while running, the server checks GitHub's
-latest release. The last check time is saved on disk. Repeated client requests
-use the local cache and do not make GitHub requests. A failed daily check is
-also limited to once per 24 hours; the previous verified update remains usable.
+Every `GET /updates/lira/latest` checks GitHub's latest stable release and
+compares it with the verified cache, without a daily delay. Equal or older
+versions keep the cached installers. A newer version is downloaded and verified
+before the request returns its metadata. Concurrent requests share one refresh.
+On startup and once every 24 hours, a background check also prepares the cache;
+its persisted interval does not limit client checks or retries after failures.
 GitHub Actions do not need to be enabled: manually published releases work too.
 
 The local Lira publisher calls `POST /updates/lira/refresh` after making both
@@ -54,17 +56,22 @@ verified and stored. Repeating a completed request does not download again.
 It never accepts uploaded binaries or external download URLs.
 An unconfigured service returns 503, an invalid token 401, an invalid tag 400,
 and a failed/mismatched refresh 502. Failures preserve the previous cache and
-authorized requests may retry immediately. Ordinary app checks still use the
-daily cache. Deploy this server change before using the updated Lira publisher.
+authorized requests may retry immediately. The publisher can also complete a
+release cached before its second installer was uploaded, reusing verified files.
 
 Windows EXE and Android APK installers are streamed to temporary files, checked
 against their declared size and GitHub SHA-256 digest when provided, then
 published atomically with the release metadata. The server computes a SHA-256
 even for older assets without a GitHub digest. It never exposes a partially
-downloaded release. While the first cache is preparing, metadata returns 503
-with `Retry-After: 30`. A stale valid cache still returns 200 with `stale: true`.
+downloaded release. Metadata requests wait for the shared refresh, including
+the initial cache preparation. A failed refresh preserves existing files and
+returns the last verified cache with `stale: true`, even if its last successful
+check was recent. Lira clients then check GitHub directly, as they also do when
+Render is unavailable, returns invalid metadata or exceeds their 65-second
+timeout. Their GitHub fallback has its own 15-second timeout and only accepts
+official release installers for the platform.
 If initialization fails, the 503 response includes the failed stage and a safe
-error code, plus `Retry-After` until the next daily attempt. Upstream bodies,
+error code and `Retry-After: 30`; the next client request can retry immediately. Upstream bodies,
 signed URLs and credentials are never included in this diagnostic.
 Only the latest release and its predecessor are retained, allowing an app that
 already received the previous download URL to finish updating. Downloads
@@ -85,8 +92,8 @@ Optional configuration:
 - `LIRA_UPDATE_CACHE_DISABLED=1`: disables the background task for isolated server
   tests; it should not be set in the deployed service.
 
-Run `node --test test/liraUpdates.test.mjs test/server.test.mjs` to verify daily
-checks, local downloads, concurrent requests, restarts, corruption and failure
+Run `node --test test/liraUpdates.test.mjs test/server.test.mjs` to verify client
+and background checks, local downloads, concurrent requests, restarts, corruption and failure
 recovery without fetching real release binaries.
 
 ## Public rooms
