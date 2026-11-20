@@ -1,15 +1,15 @@
 import express from 'express'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Transform, Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
 
 export const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
-const API = 'https://api.github.com/repos/C1ean-dev/Lira'
+const REPO = 'C1ean-dev/Lira'
+const API = `https://api.github.com/repos/${REPO}`
 const VERSION = /^v?\d+\.\d+\.\d+$/
+const ASSET_NAME = /^Lira[\w .-]*\.(exe|apk)$/i
+const DIGEST = /^sha256:[a-f0-9]{64}$/
 const MAX_ASSET_BYTES = 512 * 1024 * 1024
 const BASE_URL = 'https://lira-signaling.onrender.com/updates/lira'
 const validId = value => Number.isSafeInteger(value) && value > 0
@@ -21,27 +21,24 @@ const isNewerVersion = (latest, current) => {
   }
   return false
 }
-const hashOf = async file => {
-  const hash = createHash('sha256')
-  for await (const chunk of createReadStream(file)) hash.update(chunk)
-  return hash.digest('hex')
-}
+const releaseDownloadUrl = (tagName, name) =>
+  `https://github.com/${REPO}/releases/download/${encodeURIComponent(tagName)}/${encodeURIComponent(name)}`
 
 export function createLiraUpdates({ env = process.env, fetch: fetcher = globalThis.fetch, now = Date.now,
   directory = env.LIRA_UPDATE_CACHE_DIR || path.join(os.tmpdir(), 'lira-update-cache'),
-  baseUrl = BASE_URL, warn = console.warn } = {}) {
+  baseUrl = env.LIRA_UPDATES_BASE_URL || (env.PUBLIC_BASE_URL ? `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/updates/lira` : BASE_URL),
+  warn = console.warn } = {}) {
   const stateFile = path.join(directory, 'cache.json')
   let state = { lastCheckedAt: 0, lastSuccessfulAt: 0, release: null, previous: null }
   let loading, pending, timer
   let phase = 'idle'
   let lastFailure = null
-  const headers = binary => {
-    const value = { 'User-Agent': 'Lira-Update-Cache', Accept: binary ? 'application/octet-stream' : 'application/vnd.github+json' }
+  const headers = () => {
+    const value = { 'User-Agent': 'Lira-Update-Cache', Accept: 'application/vnd.github+json' }
     const token = env.GITHUB_RELEASES_TOKEN || env.GITHUB_TOKEN || env.GITHUB_REPORT_TOKEN
     if (token) value.Authorization = `Bearer ${token}`
     return value
   }
-  const filename = asset => `${asset.id}-${asset.sha256}.bin`
   async function persist(next) {
     const temporary = `${stateFile}.${randomUUID()}.tmp`
     try {
@@ -49,25 +46,40 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
       await fs.rename(temporary, stateFile)
     } finally { await fs.unlink(temporary).catch(() => {}) }
   }
-  async function validCachedRelease(release) {
+  function normalizeAsset(asset) {
+    if (!asset || !validId(asset.id) || !Number.isSafeInteger(asset.size) || asset.size < 1 || asset.size > MAX_ASSET_BYTES ||
+        !ASSET_NAME.test(asset.name || '')) return null
+    const digest = asset.digest ?? (typeof asset.sha256 === 'string' && /^[a-f0-9]{64}$/.test(asset.sha256) ? `sha256:${asset.sha256}` : null)
+    if (digest != null && !DIGEST.test(digest)) return null
+    return { id: asset.id, name: asset.name, size: asset.size, ...(digest ? { digest } : {}) }
+  }
+  function validCachedRelease(release) {
     if (!release || !VERSION.test(release.tag_name || '') || !Array.isArray(release.assets) || !release.assets.length || release.assets.length > 2) return null
-    for (const asset of release.assets) {
-      if (!validId(asset.id) || !/^[a-f0-9]{64}$/.test(asset.sha256 || '') || !Number.isSafeInteger(asset.size) || asset.size < 1 || asset.size > MAX_ASSET_BYTES ||
-          !/^Lira[\w .-]*\.(exe|apk)$/i.test(asset.name || '')) return null
-      const file = path.join(directory, filename(asset))
-      try {
-        if ((await fs.stat(file)).size !== asset.size || await hashOf(file) !== asset.sha256) return null
-      } catch { return null }
+    const assets = release.assets.map(normalizeAsset)
+    if (assets.some(asset => !asset)) return null
+    return {
+      tag_name: release.tag_name,
+      name: String(release.name || release.tag_name),
+      body: String(release.body || ''),
+      html_url: `https://github.com/${REPO}/releases/tag/${release.tag_name}`,
+      assets,
     }
-    return release
+  }
+  async function cleanupLegacyBinaries() {
+    try {
+      for (const file of await fs.readdir(directory)) {
+        if (/^\d+-[a-f0-9]{64}\.bin$/.test(file)) await fs.unlink(path.join(directory, file)).catch(() => {})
+      }
+    } catch { /* Ignore cleanup errors on ephemeral storage. */ }
   }
   async function load() {
     if (!loading) loading = (async () => {
       await fs.mkdir(directory, { recursive: true })
+      await cleanupLegacyBinaries()
       try {
         const saved = JSON.parse(await fs.readFile(stateFile, 'utf8'))
-        const release = await validCachedRelease(saved.release)
-        const previous = await validCachedRelease(saved.previous)
+        const release = validCachedRelease(saved.release)
+        const previous = validCachedRelease(saved.previous)
         state = { lastCheckedAt: Number.isFinite(saved.lastCheckedAt) ? saved.lastCheckedAt : 0,
           lastSuccessfulAt: Number.isFinite(saved.lastSuccessfulAt) ? saved.lastSuccessfulAt : 0,
           release: release || previous, previous: release ? previous : null }
@@ -78,7 +90,7 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     return loading
   }
   async function metadata() {
-    const response = await fetcher(`${API}/releases/latest`, { headers: headers(false), redirect: 'error', signal: AbortSignal.timeout(15000) })
+    const response = await fetcher(`${API}/releases/latest`, { headers: headers(), redirect: 'error', signal: AbortSignal.timeout(15000) })
     if (!response.ok) throw Object.assign(new Error('release unavailable'), { code: `GITHUB_HTTP_${response.status}` })
     const chunks = []; let bytes = 0
     for await (const chunk of response.body) {
@@ -88,53 +100,13 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     }
     const release = JSON.parse(Buffer.concat(chunks).toString('utf8'))
     if (release.draft || release.prerelease || !VERSION.test(release.tag_name || '')) throw new Error('invalid release')
-    const assets = ['exe', 'apk'].map(extension => release.assets?.find(asset =>
+    const rawAssets = ['exe', 'apk'].map(extension => release.assets?.find(asset =>
       /^Lira[\w .-]*$/i.test(asset.name || '') && asset.name.toLowerCase().endsWith(`.${extension}`) && asset.state === 'uploaded')).filter(Boolean)
-    if (!assets.length) throw new Error('no installers')
-    for (const asset of assets) {
-      if (!validId(asset.id) || !Number.isSafeInteger(asset.size) || asset.size < 1 || asset.size > MAX_ASSET_BYTES ||
-          (asset.digest != null && !/^sha256:[a-f0-9]{64}$/.test(asset.digest))) throw new Error('invalid installer')
-    }
+    if (!rawAssets.length) throw new Error('no installers')
+    const assets = rawAssets.map(normalizeAsset)
+    if (assets.some(asset => !asset)) throw new Error('invalid installer')
     return { tag_name: release.tag_name, name: String(release.name || release.tag_name), body: String(release.body || ''),
-      html_url: `https://github.com/C1ean-dev/Lira/releases/tag/${release.tag_name}`, assets }
-  }
-  async function cacheAsset(asset) {
-    phase = asset.name.endsWith('.apk') ? 'android_installer' : 'windows_installer'
-    const old = [state.release, state.previous].flatMap(release => release?.assets || []).find(item =>
-      item.id === asset.id && item.size === asset.size && (!asset.digest || asset.digest === `sha256:${item.sha256}`))
-    if (old) return { ...old, name: asset.name }
-    let response = await fetcher(`${API}/releases/assets/${asset.id}`, { headers: headers(true), redirect: 'manual', signal: AbortSignal.timeout(180000) })
-    if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const redirect = new URL(response.headers.get('location'))
-      await response.body?.cancel()
-      if (redirect.protocol !== 'https:' || redirect.username || redirect.password ||
-          !['release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(redirect.hostname)) throw new Error('invalid redirect')
-      // Signed asset URLs must never receive the GitHub token.
-      response = await fetcher(redirect.href, { redirect: 'error', signal: AbortSignal.timeout(180000) })
-    }
-    if (response.status !== 200 || !response.body) throw Object.assign(new Error('installer unavailable'), { code: `GITHUB_HTTP_${response.status}` })
-    const temporary = path.join(directory, `${asset.id}-${randomUUID()}.tmp`)
-    let bytes = 0
-    const hash = createHash('sha256')
-    const count = new Transform({ transform(chunk, _encoding, done) {
-      bytes += chunk.length
-      if (bytes > asset.size) { done(new Error('installer too large')); return }
-      hash.update(chunk); done(null, chunk)
-    } })
-    try {
-      await pipeline(Readable.fromWeb(response.body), count, createWriteStream(temporary, { flags: 'wx' }))
-      const sha256 = hash.digest('hex')
-      if (bytes !== asset.size || (asset.digest && asset.digest !== `sha256:${sha256}`)) throw new Error('installer verification failed')
-      const cached = { id: asset.id, name: asset.name, size: bytes, sha256 }
-      await fs.rename(temporary, path.join(directory, filename(cached)))
-      return cached
-    } finally { await fs.unlink(temporary).catch(() => {}) }
-  }
-  async function cleanup() {
-    const keep = new Set([state.release, state.previous].flatMap(release => release?.assets || []).map(filename))
-    for (const file of await fs.readdir(directory)) {
-      if (/^\d+-[a-f0-9]{64}\.bin$/.test(file) && !keep.has(file)) await fs.unlink(path.join(directory, file)).catch(() => {})
-    }
+      html_url: `https://github.com/${REPO}/releases/tag/${release.tag_name}`, assets }
   }
   async function refresh({ force = false, tagName } = {}) {
     await load()
@@ -156,28 +128,30 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
         const newer = !state.release || isNewerVersion(release.tag_name, state.release.tag_name)
         const completePublication = tagName && state.release?.tag_name === tagName && state.release.assets.length < release.assets.length
         if (newer || completePublication) {
-          const assets = []
-          for (const asset of release.assets) assets.push(await cacheAsset(asset))
-          next = { ...next, release: { ...release, assets }, previous: newer ? state.release : state.previous }
+          next = { ...next, release, previous: newer ? state.release : state.previous }
         }
-        // Publish metadata only after all files are verified and ready to serve.
         phase = 'publish_cache'
         await persist(next)
         state = next
         lastFailure = null
       } catch (error) {
         const code = /^(GITHUB_HTTP_\d{3}|EACCES|EPERM|ENOSPC|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN)$/.test(error.code || '')
-          ? error.code : /^(invalid release|no installers|invalid installer|invalid redirect|installer verification failed|installer too large|release too large)$/.test(error.message)
+          ? error.code : /^(invalid release|no installers|invalid installer|release too large)$/.test(error.message)
             ? error.message.replaceAll(' ', '_') : error.name === 'TimeoutError' ? 'upstream_timeout' : 'cache_refresh_failed'
         lastFailure = { stage: phase, code }
         warn(`[Lira Updates] Consulta falhou em ${phase} (${code}); a última atualização válida foi preservada.`)
       } finally {
         phase = 'idle'
-        // Failed multi-file refreshes must not accumulate unpublished installers.
-        await cleanup().catch(() => {})
       }
     })().finally(() => { pending = null })
     return pending
+  }
+  const findAsset = assetId => {
+    for (const release of [state.release, state.previous]) {
+      const asset = release?.assets?.find(item => String(item.id) === assetId)
+      if (asset) return { release, asset }
+    }
+    return null
   }
   const router = express.Router()
   router.use((_req, res, next) => {
@@ -201,7 +175,6 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     if (typeof tagName !== 'string' || !VERSION.test(tagName)) { res.status(400).json({ error: 'invalid_tag' }); return }
     try {
       await load()
-      // A background refresh may still be downloading the previous release.
       if (pending) await pending
       const ready = () => state.release?.tag_name === tagName && state.release.assets.length === 2
       if (!ready()) await refresh({ force: true, tagName })
@@ -213,8 +186,6 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
     res.setHeader('Cache-Control', 'no-store')
     try {
       await load()
-      // Every app check verifies GitHub, sharing any refresh already in progress.
-      // Do not return the old release while newer installers are still downloading.
       await refresh({ force: true })
       if (!state.release) {
         res.setHeader('Retry-After', '30')
@@ -225,20 +196,23 @@ export function createLiraUpdates({ env = process.env, fetch: fetcher = globalTh
       res.json({ ...state.release, checked_at: new Date(state.lastSuccessfulAt).toISOString(),
         stale: lastFailure !== null || now() - state.lastSuccessfulAt >= UPDATE_INTERVAL_MS,
         assets: state.release.assets.map(asset => ({ id: asset.id, name: asset.name, size: asset.size,
-          digest: `sha256:${asset.sha256}`, browser_download_url: `${baseUrl}/assets/${asset.id}` })) })
+          ...(asset.digest ? { digest: asset.digest } : {}),
+          browser_download_url: `${baseUrl}/assets/${asset.id}` })) })
     } catch { res.status(503).json({ error: 'update_cache_unavailable' }) }
   })
   router.get('/assets/:assetId', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store')
+    res.setHeader('Referrer-Policy', 'no-referrer')
     try {
       await load()
-      const asset = [state.release, state.previous].flatMap(release => release?.assets || []).find(item => String(item.id) === req.params.assetId)
-      if (!asset) { res.sendStatus(404); return }
-      res.setHeader('Cache-Control', 'public, max-age=86400, immutable')
-      res.setHeader('Content-Type', 'application/octet-stream')
-      res.setHeader('ETag', `"${asset.sha256}"`)
-      res.download(path.resolve(directory, filename(asset)), asset.name, error => {
-        if (error && !res.headersSent) res.status(503).end()
-      })
+      if (!state.release) await refresh({ force: true })
+      else if (!findAsset(req.params.assetId) && pending) await pending
+      const match = findAsset(req.params.assetId)
+      if (!match) { res.sendStatus(404); return }
+      // Redirect clients directly to the official GitHub Release CDN so installer
+      // binaries never consume this server's outbound bandwidth.
+      res.setHeader('Location', releaseDownloadUrl(match.release.tag_name, match.asset.name))
+      res.status(302).end()
     } catch { if (!res.headersSent) res.sendStatus(503) }
   })
   return { router, refresh,

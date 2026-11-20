@@ -6,6 +6,7 @@ const API = `https://api.github.com/repos/${REPO}`
 export const INSTALLER = 'Lira-Clean-Nativo-Windows-x64-Setup.exe'
 const MAX_BYTES = 256 * 1024 * 1024
 const VERSION = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+const ALLOWED_ASSET_HOSTS = ['release-assets.githubusercontent.com', 'objects.githubusercontent.com']
 
 export function releaseUpdate(release, baseUrl) {
   if (!release || release.draft || release.prerelease || !VERSION.test(release.tag_name || '')) return null
@@ -31,8 +32,17 @@ async function json(response) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
+function validatedAssetRedirect(location) {
+  const redirect = new URL(location)
+  if (redirect.protocol !== 'https:' || redirect.username || redirect.password ||
+      !ALLOWED_ASSET_HOSTS.includes(redirect.hostname)) throw new Error('redirect')
+  return redirect.href
+}
+
 export function createNativeUpdates({ env = process.env, fetch: fetcher = globalThis.fetch, now = Date.now,
-  baseUrl = 'https://lira-signaling.onrender.com/updates/lira-clean' } = {}) {
+  baseUrl = env.LIRA_NATIVE_UPDATES_BASE_URL || (env.PUBLIC_BASE_URL
+    ? `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/updates/lira-clean`
+    : 'https://lira-signaling.onrender.com/updates/lira-clean') } = {}) {
   let cached
   let until = 0
   let pending
@@ -67,13 +77,32 @@ export function createNativeUpdates({ env = process.env, fetch: fetcher = global
       try {
         const update = await latest()
         if (!update || String(req.params?.assetId) !== update.installer.url.split('/').at(-1)) { res.statusCode = 404; res.end(); return }
-        let response = await fetcher(`${API}/releases/assets/${req.params.assetId}`, { headers: headers(true), redirect: 'manual', signal: AbortSignal.timeout(120000) })
-        if (response.status === 302) {
-          const redirect = new URL(response.headers.get('location'))
-          if (redirect.protocol !== 'https:' || redirect.username || redirect.password ||
-              !['release-assets.githubusercontent.com', 'objects.githubusercontent.com'].includes(redirect.hostname)) throw new Error('redirect')
+        const proxyMode = env.LIRA_NATIVE_UPDATES_PROXY === '1'
+        let response = await fetcher(`${API}/releases/assets/${req.params.assetId}`, {
+          headers: headers(true),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(proxyMode ? 120000 : 15000),
+        })
+        if ([301, 302, 303, 307, 308].includes(response.status)) {
+          const signedUrl = validatedAssetRedirect(response.headers.get('location'))
+          await response.body?.cancel()
+          if (!proxyMode) {
+            // Redirect clients directly to GitHub's short-lived signed CDN URL so
+            // installer bytes do not consume this server's outbound bandwidth and
+            // the GitHub bot token never leaves the server.
+            res.statusCode = 302
+            res.setHeader('Location', signedUrl)
+            res.setHeader('Cache-Control', 'no-store')
+            res.setHeader('Referrer-Policy', 'no-referrer')
+            res.setHeader('X-Content-Type-Options', 'nosniff')
+            res.end()
+            return
+          }
           // A signed download URL must never receive the GitHub bot token.
-          response = await fetcher(redirect.href, { redirect: 'error', signal: AbortSignal.timeout(120000) })
+          response = await fetcher(signedUrl, { redirect: 'error', signal: AbortSignal.timeout(120000) })
+        } else if (!proxyMode) {
+          await response.body?.cancel()
+          throw new Error('redirect')
         }
         if (!response.ok) throw new Error('download')
         res.setHeader('Content-Type', 'application/octet-stream')

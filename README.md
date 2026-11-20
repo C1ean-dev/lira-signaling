@@ -31,19 +31,27 @@ Chromium browser: `npm run test:join:browser`.
 
 ## Lira application update cache
 
-`GET /updates/lira/latest` returns the last verified stable release from
+`GET /updates/lira/latest` returns the last verified stable release metadata from
 `C1ean-dev/Lira` using GitHub-compatible fields (`tag_name`, `name`, `body`,
-`html_url`, `assets`). Asset download URLs point to this Render service:
-`GET /updates/lira/assets/:assetId`. These routes are separate from the native
-`lira-clean` updater and do not change its behavior.
+`html_url`, `assets`). Asset download URLs keep pointing to this service
+(`GET /updates/lira/assets/:assetId`) for client compatibility, and those routes
+respond with `302 Found` directly to the official GitHub Release download URL so
+installer binaries (`.exe` / `.apk`) are delivered by GitHub's CDN without
+consuming this server's outbound bandwidth or disk space. These routes are
+separate from the native `lira-clean` updater (`/updates/lira-clean/*`), which
+also redirects `/updates/lira-clean/assets/:assetId` via `302 Found` to GitHub's
+short-lived signed CDN URL without exposing the bot token (set
+`LIRA_NATIVE_UPDATES_PROXY=1` only if a legacy client requires server-side
+streaming fallback).
 
 Every `GET /updates/lira/latest` checks GitHub's latest stable release and
-compares it with the verified cache, without a daily delay. Equal or older
-versions keep the cached installers. A newer version is downloaded and verified
-before the request returns its metadata. Concurrent requests share one refresh.
-On startup and once every 24 hours, a background check also prepares the cache;
-its persisted interval does not limit client checks or retries after failures.
-GitHub Actions do not need to be enabled: manually published releases work too.
+compares it with the cached metadata, without a daily delay. Equal or older
+versions keep the cached metadata. A newer version is validated before the
+request returns its metadata. Concurrent requests share one refresh.
+On startup and once every 24 hours, a background check also refreshes the
+metadata cache; its persisted interval does not limit client checks or retries
+after failures. GitHub Actions do not need to be enabled: manually published
+releases work too.
 
 The local Lira publisher calls `POST /updates/lira/refresh` after making both
 installers public on GitHub. Set the same random `LIRA_UPDATE_PUBLISH_TOKEN` secret
@@ -51,50 +59,48 @@ on this service and in Lira's ignored `.env.release.local`. Requests must send
 `Authorization: Bearer <token>` and JSON `{ "tag_name": "v1.1.208" }`.
 The route bypasses the daily interval, verifies that GitHub's latest release
 matches that tag and includes both EXE and APK, and replies with
-`{ "status": "ready", "tag_name": "v1.1.208" }` only after both installers are
-verified and stored. Repeating a completed request does not download again.
+`{ "status": "ready", "tag_name": "v1.1.208" }` once the metadata is validated
+and stored. Repeating a completed request is idempotent.
 It never accepts uploaded binaries or external download URLs.
 An unconfigured service returns 503, an invalid token 401, an invalid tag 400,
 and a failed/mismatched refresh 502. Failures preserve the previous cache and
 authorized requests may retry immediately. The publisher can also complete a
-release cached before its second installer was uploaded, reusing verified files.
+release cached before its second installer was uploaded.
 
-Windows EXE and Android APK installers are streamed to temporary files, checked
-against their declared size and GitHub SHA-256 digest when provided, then
-published atomically with the release metadata. The server computes a SHA-256
-even for older assets without a GitHub digest. It never exposes a partially
-downloaded release. Metadata requests wait for the shared refresh, including
-the initial cache preparation. A failed refresh preserves existing files and
-returns the last verified cache with `stale: true`, even if its last successful
-check was recent. Lira clients then check GitHub directly, as they also do when
-Render is unavailable, returns invalid metadata or exceeds their 65-second
-timeout. Their GitHub fallback has its own 15-second timeout and only accepts
-official release installers for the platform.
+Release metadata (version tag, asset IDs, declared sizes, and GitHub SHA-256
+digests when provided) is validated and published atomically. Metadata requests
+wait for the shared refresh, including the initial preparation. A failed refresh
+preserves existing metadata and returns the last valid cache with `stale: true`,
+even if its last successful check was recent. Lira clients then check GitHub
+directly, as they also do when Render is unavailable, returns invalid metadata
+or exceeds their 65-second timeout. Their GitHub fallback has its own 15-second
+timeout and only accepts official release installers for the platform.
 If initialization fails, the 503 response includes the failed stage and a safe
 error code and `Retry-After: 30`; the next client request can retry immediately. Upstream bodies,
 signed URLs and credentials are never included in this diagnostic.
 Only the latest release and its predecessor are retained, allowing an app that
-already received the previous download URL to finish updating. Downloads
-support HEAD and byte ranges and do not require GitHub to be available.
+already received the previous download URL to finish updating.
 
 Optional configuration:
 
-- `LIRA_UPDATE_CACHE_DIR`: cache directory. Defaults to the OS temporary directory
-  under `lira-update-cache`. For persistence across Render restarts/deployments,
-  set it to a directory on an attached persistent disk, for example
-  `/var/data/lira-updates`. Render's default filesystem is ephemeral; without a
-  disk, a restart can require rebuilding the cache from GitHub. Free services
-  cannot attach persistent disks. See https://render.com/docs/disks and
-  https://render.com/docs/free.
+- `LIRA_UPDATE_CACHE_DIR`: metadata cache directory (`cache.json`). Defaults to
+  the OS temporary directory under `lira-update-cache`. Any legacy `.bin` files
+  from previous versions are cleaned up automatically on startup.
+- `PUBLIC_BASE_URL` (or `LIRA_UPDATES_BASE_URL` / `LIRA_NATIVE_UPDATES_BASE_URL`):
+  optional override for the public URL prefix returned in update metadata
+  (defaults to `https://lira-signaling.onrender.com`).
+- `LIRA_NATIVE_UPDATES_PROXY=1`: optional fallback to stream `lira-clean`
+  installers through this server instead of redirecting with `302 Found` to
+  GitHub's signed CDN URL.
 - `GITHUB_RELEASES_TOKEN` (or `GITHUB_TOKEN`, then `GITHUB_REPORT_TOKEN`): optional token for GitHub release
   requests. Public releases work without a token. Credentials are used only for
   requests to `api.github.com`, never forwarded to signed CDN URLs or clients.
 - `LIRA_UPDATE_CACHE_DISABLED=1`: disables the background task for isolated server
   tests; it should not be set in the deployed service.
 
-Run `node --test test/liraUpdates.test.mjs test/server.test.mjs` to verify client
-and background checks, local downloads, concurrent requests, restarts, corruption and failure
-recovery without fetching real release binaries.
+Run `node --test test/liraUpdates.test.mjs test/nativeUpdates.test.mjs test/server.test.mjs`
+to verify metadata checks, zero-bandwidth 302 redirects, concurrent requests,
+restarts and failure recovery without fetching real release binaries.
 
 ## Public rooms
 
