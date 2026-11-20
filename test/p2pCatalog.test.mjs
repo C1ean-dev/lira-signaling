@@ -62,3 +62,7 @@ test('an independent source can omit Render and cannot be forced to federate thr
   const response=await post(url,{version:1,nodes:[],sources:['https://lira-signaling.onrender.com/p2p/catalog/v1']})
   assert.deepEqual((await response.json()).sources,['https://independent.example.com/p2p/catalog/v1'])
 })
+test('Koyeb public domain is used as the catalog own source URL automatically',async t=>{
+  const url=await serverFor(t,{env:{KOYEB_PUBLIC_DOMAIN:'lira-signaling-org.koyeb.app',LIRA_P2P_FEDERATE_RENDER:'false'}})
+  assert.deepEqual((await (await fetch(url)).json()).sources,['https://lira-signaling-org.koyeb.app/p2p/catalog/v1'])
+})

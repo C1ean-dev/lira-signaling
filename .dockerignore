@@ -1,0 +1,11 @@
+.git
+.github
+.build-tools
+.lira-p2p
+.env
+.env.*
+node_modules
+relay
+test
+scripts/join-page.browser.mjs
+*.log

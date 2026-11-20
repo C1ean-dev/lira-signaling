@@ -1,5 +1,6 @@
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
+import { publicBaseUrl } from './publicHost.mjs'
 
 const REPO = 'C1ean-dev/lira-clean'
 const API = `https://api.github.com/repos/${REPO}`
@@ -40,9 +41,7 @@ function validatedAssetRedirect(location) {
 }
 
 export function createNativeUpdates({ env = process.env, fetch: fetcher = globalThis.fetch, now = Date.now,
-  baseUrl = env.LIRA_NATIVE_UPDATES_BASE_URL || (env.PUBLIC_BASE_URL
-    ? `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/updates/lira-clean`
-    : 'https://lira-signaling.onrender.com/updates/lira-clean') } = {}) {
+  baseUrl = env.LIRA_NATIVE_UPDATES_BASE_URL || `${publicBaseUrl(env)}/updates/lira-clean` } = {}) {
   let cached
   let until = 0
   let pending

@@ -282,3 +282,21 @@ test('authenticated publication can complete a partially cached release', async 
   assert.equal(f.calls.length, 2)
   assert.equal((await (await fetch(f.origin + '/latest')).json()).assets.length, 2)
 })
+
+test('Koyeb public domain is used automatically for update asset URLs', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lira-cache-koyeb-'))
+  const cache = createLiraUpdates({
+    directory,
+    env: { KOYEB_PUBLIC_DOMAIN: 'lira-signaling-org.koyeb.app' },
+    fetch: async () => Response.json(release(1)),
+    warn: () => {},
+  })
+  const app = express(); app.use(cache.router)
+  const server = app.listen(0, '127.0.0.1'); await once(server, 'listening')
+  t.after(async () => {
+    cache.close(); await new Promise(resolve => server.close(resolve))
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  })
+  const info = await (await fetch(`http://127.0.0.1:${server.address().port}/latest`)).json()
+  assert.equal(info.assets[0].browser_download_url, 'https://lira-signaling-org.koyeb.app/updates/lira/assets/10')
+})

@@ -3,6 +3,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { publicBaseUrl } from './publicHost.mjs'
 
 export const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000
 const REPO = 'C1ean-dev/Lira'
@@ -11,7 +12,6 @@ const VERSION = /^v?\d+\.\d+\.\d+$/
 const ASSET_NAME = /^Lira[\w .-]*\.(exe|apk)$/i
 const DIGEST = /^sha256:[a-f0-9]{64}$/
 const MAX_ASSET_BYTES = 512 * 1024 * 1024
-const BASE_URL = 'https://lira-signaling.onrender.com/updates/lira'
 const validId = value => Number.isSafeInteger(value) && value > 0
 const isNewerVersion = (latest, current) => {
   const parts = value => value.replace(/^v/i, '').split('.').map(BigInt)
@@ -26,7 +26,7 @@ const releaseDownloadUrl = (tagName, name) =>
 
 export function createLiraUpdates({ env = process.env, fetch: fetcher = globalThis.fetch, now = Date.now,
   directory = env.LIRA_UPDATE_CACHE_DIR || path.join(os.tmpdir(), 'lira-update-cache'),
-  baseUrl = env.LIRA_UPDATES_BASE_URL || (env.PUBLIC_BASE_URL ? `${env.PUBLIC_BASE_URL.replace(/\/+$/, '')}/updates/lira` : BASE_URL),
+  baseUrl = env.LIRA_UPDATES_BASE_URL || `${publicBaseUrl(env)}/updates/lira`,
   warn = console.warn } = {}) {
   const stateFile = path.join(directory, 'cache.json')
   let state = { lastCheckedAt: 0, lastSuccessfulAt: 0, release: null, previous: null }

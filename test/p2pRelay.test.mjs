@@ -66,3 +66,31 @@ test('an explicit persistent identity directory survives Node and Docker configu
   assert.equal(captured[captured.indexOf('--data')+1],'/data/relay')
   stop()
 })
+
+test('Koyeb public domain configures relay proxy, advertise multiaddr and catalog URL automatically',async t=>{
+  const backend=createServer(),wss=new WebSocketServer({server:backend})
+  wss.on('connection',ws=>ws.on('message',(data,binary)=>ws.send(data,{binary})))
+  await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve))
+  const env={KOYEB_PUBLIC_DOMAIN:'lira-signaling-org.koyeb.app',LIRA_P2P_RELAY_LISTEN:`/ip4/127.0.0.1/tcp/${backend.address().port}/ws`}
+  const proxy=createServer();proxy.on('upgrade',createP2PRelayProxy({env}))
+  await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve))
+  t.after(()=>{for(const ws of wss.clients)ws.terminate();backend.close();proxy.close()})
+  const ws=new WebSocket(`ws://127.0.0.1:${proxy.address().port}/p2p/relay`)
+  await once(ws,'open')
+  const received=once(ws,'message'),payload=Buffer.from([1,2,3])
+  ws.send(payload)
+  const [data,binary]=await received
+  assert.equal(binary,true);assert.deepEqual(data,payload)
+  ws.close();await once(ws,'close')
+
+  let captured
+  const child=new EventEmitter();child.kill=()=>{}
+  const stop=startManagedP2PRelay({
+    env:{LIRA_P2P_RELAY_BIN:'/usr/local/bin/lira-p2p-node',KOYEB_PUBLIC_DOMAIN:'lira-signaling-org.koyeb.app',LIRA_P2P_FEDERATE_RENDER:'false'},
+    spawnProcess:(_file,args)=>{captured=args;return child},
+  })
+  assert.ok(captured.includes('/dns4/lira-signaling-org.koyeb.app/tcp/443/tls/x-parity-ws/%2Fp2p%2Frelay'))
+  assert.ok(captured.includes('https://lira-signaling-org.koyeb.app/p2p/catalog/v1'))
+  assert.equal(captured.includes('https://lira-signaling.onrender.com/p2p/catalog/v1'),false)
+  stop()
+})

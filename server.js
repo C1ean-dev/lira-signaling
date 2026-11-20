@@ -11,6 +11,7 @@ import { createP2PCatalog, CATALOG_PATH } from './p2pCatalog.mjs'
 import { createP2PRelayProxy, startManagedP2PRelay } from './p2pRelay.mjs'
 import { createJoinPageRouter } from './joinPage.js'
 import { createLiraUpdates } from './liraUpdates.mjs'
+import { publicBaseUrl } from './publicHost.mjs'
 
 const port = process.env.PORT || 9000
 
@@ -26,7 +27,7 @@ app.all('/turn/credentials', createTurnCredentialsHandler())
 app.all('/report-issue', express.json({ limit: '10mb' }), createIssueReporterHandler())
 app.all('/report-issue/lira-clean', express.json({ limit: '10mb' }), createIssueReporterHandler({
   targetRepository: 'C1ean-dev/lira-clean',
-  attachmentBaseUrl: 'https://lira-signaling.onrender.com/report-issue/lira-clean/attachments',
+  attachmentBaseUrl: `${publicBaseUrl()}/report-issue/lira-clean/attachments`,
 }))
 app.get('/report-issue/lira-clean/attachments/:gistId/:index', createReportAttachmentHandler())
 const nativeUpdates = createNativeUpdates()

@@ -2,18 +2,21 @@ import { connect } from 'node:net'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { publicHostname } from './publicHost.mjs'
 
 const DEFAULT_LISTEN='/ip4/127.0.0.1/tcp/9001/ws'
-function renderUpstream(env) {
+const DOCKER_BINARY='/usr/local/bin/lira-p2p-node'
+function managedUpstream(env) {
   const listen=env.LIRA_P2P_RELAY_LISTEN || DEFAULT_LISTEN
   const port=/^\/ip4\/127\.0\.0\.1\/tcp\/(\d+)\/ws$/.exec(listen)?.[1]
   if(!port || Number(port)<1 || Number(port)>65535)throw new Error('Configure LIRA_P2P_RELAY_UPSTREAM for a non-default relay listener')
   return `ws://127.0.0.1:${port}/`
 }
+const isManagedHost = env => env.RENDER==='true' || Boolean(env.PUBLIC_BASE_URL || env.KOYEB_PUBLIC_DOMAIN || env.LIRA_P2P_RELAY_BIN)
 
 // Only a fixed loopback upstream is accepted. Request parameters never choose it.
 export function createP2PRelayProxy({env=process.env,upstream,maxConnections=256} = {}) {
-  upstream ??= env.LIRA_P2P_RELAY_UPSTREAM || (env.RENDER==='true' ? renderUpstream(env) : undefined)
+  upstream ??= env.LIRA_P2P_RELAY_UPSTREAM || (isManagedHost(env) ? managedUpstream(env) : undefined)
   let target
   if (upstream) {
     target=new URL(upstream)
@@ -46,14 +49,16 @@ export function createP2PRelayProxy({env=process.env,upstream,maxConnections=256
 
 export function startManagedP2PRelay({env=process.env,spawnProcess=spawn}={}) {
   const bundled=fileURLToPath(new URL('./relay/target/release/lira-p2p-node',import.meta.url))
-  const binary=env.LIRA_P2P_RELAY_BIN || (env.RENDER==='true' && existsSync(bundled) ? bundled : '')
+  const managed=isManagedHost(env)
+  const binary=env.LIRA_P2P_RELAY_BIN || (managed && existsSync(bundled) ? bundled : managed && existsSync(DOCKER_BINARY) ? DOCKER_BINARY : '')
   if(!binary){
-    if(env.RENDER==='true')console.warn('Catálogo P2P ativo; relay Rust não configurado. Configure um token GitHub com leitura de lira-clean e refaça o build com scripts npm habilitados.')
+    if(managed)console.warn('Catálogo P2P ativo; relay Rust não configurado. Configure um token GitHub com leitura de lira-clean e refaça o build.')
     return ()=>{}
   }
-  const advertise=env.LIRA_P2P_RELAY_ADVERTISE || (env.RENDER_EXTERNAL_HOSTNAME ? `/dns4/${env.RENDER_EXTERNAL_HOSTNAME}/tcp/443/tls/x-parity-ws/%2Fp2p%2Frelay` : '')
-  if(!advertise)throw new Error('LIRA_P2P_RELAY_ADVERTISE or RENDER_EXTERNAL_HOSTNAME is required for the managed native relay')
-  const ownCatalog=env.LIRA_P2P_CATALOG_URL || (env.RENDER_EXTERNAL_HOSTNAME ? `https://${env.RENDER_EXTERNAL_HOSTNAME}/p2p/catalog/v1` : 'https://lira-signaling.onrender.com/p2p/catalog/v1')
+  const host=publicHostname(env)
+  const advertise=env.LIRA_P2P_RELAY_ADVERTISE || (host ? `/dns4/${host}/tcp/443/tls/x-parity-ws/%2Fp2p%2Frelay` : '')
+  if(!advertise)throw new Error('LIRA_P2P_RELAY_ADVERTISE, RENDER_EXTERNAL_HOSTNAME, KOYEB_PUBLIC_DOMAIN or PUBLIC_BASE_URL is required for the managed native relay')
+  const ownCatalog=env.LIRA_P2P_CATALOG_URL || (host ? `https://${host}/p2p/catalog/v1` : 'https://lira-signaling.onrender.com/p2p/catalog/v1')
   const args=['--data',env.LIRA_P2P_RELAY_DATA || '.lira-p2p/relay','--listen',env.LIRA_P2P_RELAY_LISTEN || DEFAULT_LISTEN,'--advertise',advertise]
   for(const url of new Set([ownCatalog,...(env.LIRA_P2P_FEDERATE_RENDER==='false'?[]:['https://lira-signaling.onrender.com/p2p/catalog/v1'])]))args.push('--catalog-url',url)
   let child,stopped=false,timer

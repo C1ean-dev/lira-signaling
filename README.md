@@ -234,6 +234,19 @@ versions continue using PeerJS normally.
 
 ## Catálogo nativo e relay WSS
 
+### Deploy via Docker (Northflank Sandbox ou qualquer host Docker)
+
+Este repositório inclui um `Dockerfile` multi-stage pronto para **Northflank** (plano Sandbox gratuito, always-on e sem cartão) ou qualquer provedor Docker:
+
+1. Conecte o repositório GitHub `C1ean-dev/lira-signaling` (branch `main`) e escolha **Dockerfile** (`/Dockerfile`).
+2. Exponha a porta **`9000`** (HTTP/HTTPS público, com suporte a WebSockets) e configure o **Health check** HTTP `GET` em **`/health`**.
+3. Em **Environment variables**, configure:
+   - `PUBLIC_BASE_URL`: URL pública HTTPS do serviço (ex.: `https://seu-servico.northflank.app`). Usada automaticamente em `/updates/*`, `/report-issue/lira-clean/attachments`, `/p2p/catalog/v1` e `/p2p/relay`.
+   - `CLOUDFLARE_TURN_KEY_ID` e `CLOUDFLARE_TURN_API_TOKEN`
+   - `GITHUB_REPORT_TOKEN` (e opcionalmente `LIRA_UPDATE_PUBLISH_TOKEN`)
+   - Para **compilar e ativar o relay Rust (`/p2p/relay`)** no build Docker, passe `LIRA_RELAY_SOURCE_TOKEN` (token GitHub com `Contents: Read` em `C1ean-dev/lira-clean`) **ou** `LIRA_BUILD_RELAY=1` (reaproveitando `GITHUB_REPORT_TOKEN`) como variável/build-arg. Para um deploy rápido só com Node (~15s, sem compilar Rust), deixe `LIRA_RELAY_SOURCE_TOKEN` vazio ou defina `LIRA_BUILD_RELAY=0`.
+   - Opcional: `LIRA_P2P_FEDERATE_RENDER=false` se não quiser federar com o endereço antigo da Render.
+
 ### Serviço Node existente na Render
 
 Mantenha o runtime **Node**, build `npm ci` (ou `npm install`) e start `npm start`.

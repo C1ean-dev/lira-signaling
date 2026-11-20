@@ -2,6 +2,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import { isIP } from 'node:net'
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { publicHostname } from './publicHost.mjs'
 
 export const CATALOG_PATH = '/p2p/catalog/v1'
 const DEFAULT_URL = 'https://lira-signaling.onrender.com' + CATALOG_PATH
@@ -69,7 +70,8 @@ export function verifyAdvertisement(record, now = Math.floor(Date.now()/1000), l
 
 export function createP2PCatalog({ env = process.env, now = () => Math.floor(Date.now()/1000), allowLocal = false } = {}) {
   const records = new Map()
-  const ownURL=env.LIRA_P2P_CATALOG_URL || (env.RENDER_EXTERNAL_HOSTNAME ? `https://${env.RENDER_EXTERNAL_HOSTNAME}${CATALOG_PATH}` : DEFAULT_URL)
+  const host = publicHostname(env)
+  const ownURL=env.LIRA_P2P_CATALOG_URL || (host ? `https://${host}${CATALOG_PATH}` : DEFAULT_URL)
   const sources = new Set([sourceURL(ownURL),...(env.LIRA_P2P_FEDERATE_RENDER==='false'?[]:[DEFAULT_URL])].filter(Boolean))
   const rates = new Map()
   const file = env.LIRA_P2P_CATALOG_FILE
